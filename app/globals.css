@@ -1,26 +1,52 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* FINNO Brand Colors */
+  --color-finno-500: #1a4e94;
+  --color-finno-800: #0b1f3a;
+  --color-teal-500: #00a88f;
+  --color-teal-600: #008f79;
+  --color-surface-base: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-text-primary: #071527;
+  --color-text-secondary: #4b5b6e;
+  --color-border: #dde2ea;
+
+  /* Typography */
+  --font-sans: var(--font-jakarta);
+  --font-mono: var(--font-jetbrains);
+
+  /* Border radius */
+  --radius-card: 16px;
+  --radius-modal: 24px;
+  --radius-button: 8px;
+  --radius-pill: 9999px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* CSS custom props for direct use in non-Tailwind contexts */
+:root {
+  --finno-500: #1a4e94;
+  --finno-800: #0b1f3a;
+  --teal-500: #00a88f;
+  --surface-base: #ffffff;
+  --surface-subtle: #f8fafc;
+  --text-primary: #071527;
+  --text-secondary: #4b5b6e;
+  --border: #dde2ea;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
