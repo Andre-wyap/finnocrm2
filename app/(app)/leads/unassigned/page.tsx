@@ -132,7 +132,7 @@ export default function UnassignedPage() {
                     {/* Name */}
                     <div className="flex items-center gap-2 min-w-0">
                       {lead.possible_duplicate && (
-                        <AlertTriangle size={14} className="shrink-0 text-amber-500" title="Possible duplicate" />
+                        <AlertTriangle size={14} className="shrink-0 text-amber-500" />
                       )}
                       <button
                         className="font-semibold text-text-primary hover:text-finno-500 transition-colors text-left truncate"
