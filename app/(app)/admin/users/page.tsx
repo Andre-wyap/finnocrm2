@@ -174,7 +174,7 @@ export default function ManageUsersPage() {
 
   // ── Shared form fields ───────────────────────────────────────────────────────
 
-  const UserFormFields = ({ showEmail }: { showEmail?: boolean }) => (
+  const renderUserFormFields = (showEmail?: boolean) => (
     <div className="flex flex-col gap-4">
       <Input
         label="Full Name"
@@ -336,7 +336,7 @@ export default function ManageUsersPage() {
           </div>
         ) : (
           <form onSubmit={handleAddUser} className="space-y-4">
-            <UserFormFields showEmail />
+            {renderUserFormFields(true)}
             <div className="flex gap-3 pt-1">
               <Button type="submit" loading={submitting} className="flex-1">Create User</Button>
               <Button type="button" variant="ghost" onClick={closeAddUser}>Cancel</Button>
@@ -348,7 +348,7 @@ export default function ManageUsersPage() {
       {/* Edit User dialog */}
       <Dialog open={!!editUser} onClose={() => setEditUser(null)} title="Edit User">
         <form onSubmit={handleEditUser} className="space-y-4">
-          <UserFormFields />
+          {renderUserFormFields()}
           <div className="flex gap-3 pt-1">
             <Button type="submit" loading={submitting} className="flex-1">Save Changes</Button>
             <Button type="button" variant="ghost" onClick={() => setEditUser(null)}>Cancel</Button>
