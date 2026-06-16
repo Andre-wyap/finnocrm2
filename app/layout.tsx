@@ -22,6 +22,14 @@ export const metadata: Metadata = {
   description: 'Simple, sustainable, and stress-free insurance management.',
 }
 
+// Render every route per-request so its HTML is served with `no-store` instead
+// of the one-year `s-maxage` that Next.js stamps on statically prerendered
+// pages. On a self-hosted CDN (Hostinger LiteSpeed) that long-lived HTML
+// outlives each rebuild and keeps pointing at hashed CSS/JS filenames the new
+// build has deleted — which loads the app with no styling. This CRM is fully
+// auth-gated, so there is nothing to gain from caching these shells.
+export const dynamic = 'force-dynamic'
+
 export default function RootLayout({
   children,
 }: Readonly<{
