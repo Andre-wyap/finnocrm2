@@ -20,43 +20,39 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const agentId = body.agent_id?.trim()
-  if (!agentId) return NextResponse.json({ error: 'agent_id is required' }, { status: 422 })
+  const targetId = body.agent_id?.trim()
+  if (!targetId) return NextResponse.json({ error: 'agent_id is required' }, { status: 422 })
 
-  // Look up agent — profiles RLS limits subadmin to own team automatically
-  const [agent] = await withUser(profile.id, (tx) =>
-    tx<{ id: string; full_name: string; team_id: string | null }[]>`
-      SELECT id, full_name, team_id FROM profiles
-      WHERE id = ${agentId}::uuid AND role = 'agent' AND is_active = true
+  // Look up the target user via get_assignable_users() — SECURITY DEFINER, so
+  // subadmins are not limited to their own team. Any active user is a valid target.
+  const [target] = await withUser(profile.id, (tx) =>
+    tx<{ id: string; full_name: string }[]>`
+      SELECT id, full_name FROM get_assignable_users()
+      WHERE id = ${targetId}::uuid
       LIMIT 1
     `
   )
 
-  if (!agent) return NextResponse.json({ error: 'Agent not found or not in scope' }, { status: 404 })
+  if (!target) return NextResponse.json({ error: 'User not found or inactive' }, { status: 404 })
 
-  // Belt-and-suspenders: subadmin can only assign to own team
-  if (profile.role === 'subadmin' && agent.team_id !== profile.team_id) {
-    return NextResponse.json({ error: 'Agent is not in your team' }, { status: 403 })
-  }
+  const activityContent = `${profile.full_name} assigned this lead to ${target.full_name}`
 
   const updated = await withUser(profile.id, async (tx) => {
-    // Read current state so we know if this is an initial assignment or a reassignment
     const [current] = await tx<{ assigned_agent_id: string | null }[]>`
       SELECT assigned_agent_id FROM leads WHERE id = ${id}::uuid LIMIT 1
     `
     if (!current) return []
 
     const isReassignment = current.assigned_agent_id !== null
-    const activityContent = isReassignment
-      ? `Reassigned to ${agent.full_name}`
-      : `Assigned to ${agent.full_name}`
+    const content = isReassignment
+      ? `${profile.full_name} reassigned this lead to ${target.full_name}`
+      : activityContent
 
     const rows = await tx<{ id: string }[]>`
       UPDATE leads
-      SET assigned_agent_id = ${agentId}::uuid,
+      SET assigned_agent_id = ${targetId}::uuid,
           assigned_by       = ${profile.id}::uuid,
           assigned_at       = now(),
-          -- Only promote to 'lead' on first assignment; reassignment keeps the current stage
           status = CASE WHEN status = 'unassigned' THEN 'lead'::lead_status ELSE status END
       WHERE id = ${id}::uuid
       RETURNING id
@@ -64,7 +60,7 @@ export async function POST(
     if (rows.length > 0) {
       await tx`
         INSERT INTO activities (lead_id, user_id, type, content)
-        VALUES (${id}::uuid, ${profile.id}::uuid, 'assignment', ${activityContent})
+        VALUES (${id}::uuid, ${profile.id}::uuid, 'assignment', ${content})
       `
     }
     return rows

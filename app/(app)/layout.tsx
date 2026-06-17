@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/client'
 import { useAuth } from '@/lib/auth/context'
-import { LogOut, Users, LayoutDashboard, UserCircle } from 'lucide-react'
+import { LogOut, Users, LayoutDashboard, UserCircle, ClipboardList, BarChart2 } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
@@ -39,14 +39,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     agent: 'Agent',
   }
 
+  const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
+
   const navLinks = [
-    { href: '/', label: 'Leads', icon: LayoutDashboard },
-    ...(profile?.role === 'admin' || profile?.role === 'subadmin'
-      ? [{ href: '/leads/unassigned', label: 'Unassigned', icon: Users }]
+    { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+    ...(isAdminOrSubadmin
+      ? [
+          { href: '/leads',            label: 'Leads',      icon: ClipboardList },
+          { href: '/reporting',        label: 'Reporting',  icon: BarChart2 },
+          { href: '/leads/unassigned', label: 'Unassigned', icon: Users },
+        ]
       : []),
     ...(profile?.role === 'admin'
       ? [{ href: '/admin/users', label: 'Users', icon: UserCircle }]
       : []),
+    { href: '/profile', label: 'Profile', icon: UserCircle },
   ]
 
   return (
@@ -64,7 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 href={href}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  pathname === href
+                  (href === '/' ? pathname === '/' : pathname.startsWith(href))
                     ? 'bg-white/15 text-white'
                     : 'text-white/70 hover:text-white hover:bg-white/10'
                 )}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 
-const VALID_STATUSES = new Set(['unassigned', 'lead', 'potential', 'closed', 'issued', 'lost'])
+const VALID_STATUSES = new Set(['unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
 const VALID_PRODUCTS = new Set(['medical', 'critical_illness', 'life', 'personal_accident'])
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -26,7 +26,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       full_name: string
       status: string
       product_interest: string[]
-      next_follow_up_at: string | null
       mobile: string
       source: string
       possible_duplicate: boolean
@@ -36,7 +35,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       agent_name: string | null
     }[]>`
       SELECT l.id, l.full_name, l.status, l.product_interest,
-             l.next_follow_up_at, l.mobile, l.source,
+             l.mobile, l.source,
              l.possible_duplicate, l.case_size, l.created_at,
              p.id   AS agent_id,
              p.full_name AS agent_name

@@ -110,13 +110,6 @@ BEGIN
             OLD.case_size::text, NEW.case_size::text);
   END IF;
 
-  IF NEW.next_follow_up_at IS DISTINCT FROM OLD.next_follow_up_at THEN
-    INSERT INTO activities(lead_id, user_id, type, field_name, old_value, new_value, follow_up_at)
-    VALUES (NEW.id, v_user_id, 'follow_up', 'next_follow_up_at',
-            OLD.next_follow_up_at::text, NEW.next_follow_up_at::text,
-            NEW.next_follow_up_at);
-  END IF;
-
   RETURN NEW;
 END;
 $$;

@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
 import {
   AlertTriangle, ArrowLeft, MessageSquare, Phone,
-  ArrowRight, Edit2, UserCheck, Calendar, Send,
+  ArrowRight, Edit2, UserCheck, Send,
 } from 'lucide-react'
 import type { LeadStatus, ActivityType } from '@/types'
 
@@ -32,7 +32,6 @@ type LeadDetail = {
   assigned_by: string | null
   assigned_at: string | null
   case_size: number | null
-  next_follow_up_at: string | null
   possible_duplicate: boolean
   created_at: string
   updated_at: string
@@ -47,14 +46,14 @@ type ActivityRow = {
   field_name: string | null
   old_value: string | null
   new_value: string | null
-  follow_up_at: string | null
   created_at: string
   actor_name: string | null
 }
 
-type AgentRow = {
+type AssignableUser = {
   id: string
   full_name: string
+  role: string
   team_id: string | null
   team_name: string | null
 }
@@ -70,7 +69,6 @@ type FormDraft = {
   product_interest: string[]
   case_size: string
   status: LeadStatus
-  next_follow_up_at: string
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -92,35 +90,25 @@ const FIELD_LABELS: Record<string, string> = {
   state: 'State',
   case_size: 'Case Size',
   status: 'Status',
-  next_follow_up_at: 'Next Follow-Up',
   product_interest: 'Product Interest',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function toMYTDate(ts: string | null): string {
-  if (!ts) return ''
-  return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' })
-}
-
 function formatActivityTime(ts: string): string {
   const date = new Date(ts)
-  const nowMYT = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }))
-  nowMYT.setHours(0, 0, 0, 0)
-  const dateMYT = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }))
-  if (dateMYT >= nowMYT) {
-    return date.toLocaleTimeString('en-MY', {
-      timeZone: 'Asia/Kuala_Lumpur',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
-  return date.toLocaleDateString('en-MY', {
+  const datePart = date.toLocaleDateString('en-MY', {
     timeZone: 'Asia/Kuala_Lumpur',
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   })
+  const timePart = date.toLocaleTimeString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${datePart}, ${timePart}`
 }
 
 function formatCreatedAt(ts: string): string {
@@ -144,7 +132,6 @@ function leadToDraft(lead: LeadDetail): FormDraft {
     product_interest: lead.product_interest ?? ['medical'],
     case_size: lead.case_size !== null ? String(lead.case_size) : '',
     status: lead.status,
-    next_follow_up_at: toMYTDate(lead.next_follow_up_at),
   }
 }
 
@@ -157,7 +144,6 @@ function ActivityIcon({ type }: { type: ActivityType }) {
     status_change: <ArrowRight size={14} />,
     field_change:  <Edit2 size={14} />,
     assignment:    <UserCheck size={14} />,
-    follow_up:     <Calendar size={14} />,
   }
   const bg: Record<ActivityType, string> = {
     remark:        'bg-blue-100 text-blue-600',
@@ -165,7 +151,6 @@ function ActivityIcon({ type }: { type: ActivityType }) {
     status_change: 'bg-violet-100 text-violet-600',
     field_change:  'bg-gray-100 text-gray-500',
     assignment:    'bg-finno-500/10 text-finno-500',
-    follow_up:     'bg-amber-100 text-amber-600',
   }
   return (
     <span className={`flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${bg[type]}`}>
@@ -221,7 +206,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [saveError, setSaveError] = useState('')
   const [remarkText, setRemarkText] = useState('')
   const [remarkSubmitting, setRemarkSubmitting] = useState(false)
-  const [agents, setAgents] = useState<AgentRow[]>([])
+  const [agents, setAgents] = useState<AssignableUser[]>([])
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [assignError, setAssignError] = useState('')
@@ -298,7 +283,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         state: draft.state || null,
         case_size: draft.case_size ? parseFloat(draft.case_size) : null,
         status: draft.status,
-        next_follow_up_at: draft.next_follow_up_at || null,
         product_interest: draft.product_interest,
       }
       const res = await apiFetch(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
@@ -553,26 +537,19 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Select
-              label="Status"
-              value={draft.status}
-              onChange={(e) => setField('status', e.target.value as LeadStatus)}
-            >
-              <option value="unassigned">Unassigned</option>
-              <option value="lead">Lead</option>
-              <option value="potential">Potential</option>
-              <option value="closed">Closed</option>
-              <option value="issued">Issued</option>
-              <option value="lost">Lost</option>
-            </Select>
-            <Input
-              label="Next Follow-Up"
-              type="date"
-              value={draft.next_follow_up_at}
-              onChange={(e) => setField('next_follow_up_at', e.target.value)}
-            />
-          </div>
+          <Select
+            label="Status"
+            value={draft.status}
+            onChange={(e) => setField('status', e.target.value as LeadStatus)}
+          >
+            <option value="unassigned">Unassigned</option>
+            <option value="lead">Lead</option>
+            <option value="follow_up">Follow-up</option>
+            <option value="potential">Potential</option>
+            <option value="closed">Closed</option>
+            <option value="issued">Issued</option>
+            <option value="lost">Lost</option>
+          </Select>
 
           {/* Read-only fields */}
           <div className="pt-2 border-t border-border space-y-2">
@@ -606,7 +583,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                   onChange={(e) => setSelectedAgentId(e.target.value)}
                   className="flex-1"
                 >
-                  <option value="">Select agent…</option>
+                  <option value="">Select user…</option>
                   {agents.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.full_name}{a.team_name ? ` (${a.team_name})` : ''}

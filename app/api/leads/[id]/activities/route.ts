@@ -10,7 +10,6 @@ type ActivityRow = {
   field_name: string | null
   old_value: string | null
   new_value: string | null
-  follow_up_at: string | null
   created_at: string
   actor_name: string | null
 }
@@ -27,7 +26,7 @@ export async function GET(
   const activities = await withUser(profile.id, (tx) =>
     tx<ActivityRow[]>`
       SELECT a.id, a.type, a.content, a.field_name, a.old_value, a.new_value,
-             a.follow_up_at, a.created_at,
+             a.created_at,
              p.full_name AS actor_name
       FROM activities a
       LEFT JOIN profiles p ON p.id = a.user_id

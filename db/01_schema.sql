@@ -8,11 +8,11 @@
 -- ─── Enums ────────────────────────────────────────────────────────────────────
 
 CREATE TYPE role AS ENUM ('agent', 'subadmin', 'admin');
-CREATE TYPE lead_status AS ENUM ('unassigned', 'lead', 'potential', 'closed', 'issued', 'lost');
+CREATE TYPE lead_status AS ENUM ('unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost');
 CREATE TYPE gender AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');
-CREATE TYPE activity_type AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'follow_up');
+CREATE TYPE activity_type AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment');
 
 -- ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,6 @@ CREATE TABLE leads (
   assigned_by        uuid REFERENCES profiles(id) ON DELETE SET NULL,
   assigned_at        timestamptz,
   case_size          numeric,
-  next_follow_up_at  timestamptz,
   possible_duplicate boolean NOT NULL DEFAULT false,
   raw_payload        jsonb,
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -72,7 +71,6 @@ CREATE TABLE activities (
   field_name   text,
   old_value    text,
   new_value    text,
-  follow_up_at timestamptz,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -81,7 +79,6 @@ CREATE TABLE activities (
 CREATE INDEX idx_leads_assigned_agent   ON leads(assigned_agent_id);
 CREATE INDEX idx_leads_status           ON leads(status);
 CREATE INDEX idx_leads_mobile           ON leads(mobile);
-CREATE INDEX idx_leads_next_follow_up   ON leads(next_follow_up_at);
 CREATE INDEX idx_activities_lead_id     ON activities(lead_id);
 CREATE INDEX idx_profiles_firebase_uid  ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id       ON profiles(team_id);

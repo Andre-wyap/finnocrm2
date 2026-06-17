@@ -4,7 +4,7 @@ import { withUser } from '@/lib/db/rls'
 import sql from '@/lib/db/client'
 import type { LeadStatus } from '@/types'
 
-const VALID_STATUSES = new Set<string>(['unassigned', 'lead', 'potential', 'closed', 'issued', 'lost'])
+const VALID_STATUSES = new Set<string>(['unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
 const VALID_GENDERS = new Set<string | null>(['male', 'female', null])
 const VALID_SMOKING = new Set<string | null>(['smoker', 'non_smoker', null])
 const VALID_PRODUCTS = new Set<string>(['medical', 'critical_illness', 'life', 'personal_accident'])
@@ -25,7 +25,6 @@ type LeadDetail = {
   assigned_by: string | null
   assigned_at: string | null
   case_size: number | null
-  next_follow_up_at: string | null
   possible_duplicate: boolean
   created_at: string
   updated_at: string
@@ -77,7 +76,6 @@ export async function PATCH(
     state?: string | null
     case_size?: number | string | null
     status?: string
-    next_follow_up_at?: string | null
     product_interest?: string[]
     possible_duplicate?: boolean
   }
@@ -115,7 +113,6 @@ export async function PATCH(
     updates.case_size = body.case_size !== null && body.case_size !== '' ? Number(body.case_size) : null
   }
   if (body.status !== undefined) updates.status = body.status
-  if (body.next_follow_up_at !== undefined) updates.next_follow_up_at = body.next_follow_up_at ?? null
   if (body.possible_duplicate !== undefined && typeof body.possible_duplicate === 'boolean') {
     updates.possible_duplicate = body.possible_duplicate
   }

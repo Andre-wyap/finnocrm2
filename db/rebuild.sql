@@ -24,11 +24,11 @@ DROP TYPE IF EXISTS role           CASCADE;
 
 -- ─── 1. Enums ─────────────────────────────────────────────────────────────────
 CREATE TYPE role           AS ENUM ('agent', 'subadmin', 'admin');
-CREATE TYPE lead_status    AS ENUM ('unassigned', 'lead', 'potential', 'closed', 'issued', 'lost');
+CREATE TYPE lead_status    AS ENUM ('unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost');
 CREATE TYPE gender         AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product        AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');
-CREATE TYPE activity_type  AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'follow_up');
+CREATE TYPE activity_type  AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment');
 
 -- ─── 2. Tables ────────────────────────────────────────────────────────────────
 CREATE TABLE teams (
@@ -70,7 +70,6 @@ CREATE TABLE leads (
   assigned_by        uuid REFERENCES profiles(id) ON DELETE SET NULL,
   assigned_at        timestamptz,
   case_size          numeric,
-  next_follow_up_at  timestamptz,
   possible_duplicate boolean NOT NULL DEFAULT false,
   raw_payload        jsonb,
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -86,7 +85,6 @@ CREATE TABLE activities (
   field_name   text,
   old_value    text,
   new_value    text,
-  follow_up_at timestamptz,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -94,7 +92,6 @@ CREATE TABLE activities (
 CREATE INDEX idx_leads_assigned_agent  ON leads(assigned_agent_id);
 CREATE INDEX idx_leads_status          ON leads(status);
 CREATE INDEX idx_leads_mobile          ON leads(mobile);
-CREATE INDEX idx_leads_next_follow_up  ON leads(next_follow_up_at);
 CREATE INDEX idx_activities_lead_id    ON activities(lead_id);
 CREATE INDEX idx_profiles_firebase_uid ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id      ON profiles(team_id);
@@ -186,11 +183,6 @@ BEGIN
     INSERT INTO activities(lead_id, user_id, type, field_name, old_value, new_value)
     VALUES (NEW.id, v_user_id, 'field_change', 'case_size', OLD.case_size::text, NEW.case_size::text);
   END IF;
-  IF NEW.next_follow_up_at IS DISTINCT FROM OLD.next_follow_up_at THEN
-    INSERT INTO activities(lead_id, user_id, type, field_name, old_value, new_value, follow_up_at)
-    VALUES (NEW.id, v_user_id, 'follow_up', 'next_follow_up_at',
-            OLD.next_follow_up_at::text, NEW.next_follow_up_at::text, NEW.next_follow_up_at);
-  END IF;
   RETURN NEW;
 END;
 $$;
@@ -213,7 +205,11 @@ ALTER TABLE teams      FORCE ROW LEVEL SECURITY;
 CREATE POLICY leads_select ON leads FOR SELECT USING (
   CASE current_user_role()
     WHEN 'admin'    THEN true
-    WHEN 'subadmin' THEN (status = 'unassigned' OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team()))
+    WHEN 'subadmin' THEN (
+      assigned_agent_id = current_user_id()
+      OR status = 'unassigned'
+      OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team())
+    )
     WHEN 'agent'    THEN assigned_agent_id = current_user_id()
     ELSE false
   END
@@ -221,7 +217,11 @@ CREATE POLICY leads_select ON leads FOR SELECT USING (
 CREATE POLICY leads_update ON leads FOR UPDATE USING (
   CASE current_user_role()
     WHEN 'admin'    THEN true
-    WHEN 'subadmin' THEN (status = 'unassigned' OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team()))
+    WHEN 'subadmin' THEN (
+      assigned_agent_id = current_user_id()
+      OR status = 'unassigned'
+      OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team())
+    )
     WHEN 'agent'    THEN assigned_agent_id = current_user_id()
     ELSE false
   END
@@ -239,7 +239,14 @@ CREATE POLICY profiles_select ON profiles FOR SELECT USING (
 );
 CREATE POLICY profiles_update ON profiles FOR UPDATE
   USING (id = current_user_id() OR current_user_role() = 'admin')
-  WITH CHECK (current_user_role() = 'admin');
+  WITH CHECK (
+    current_user_role() = 'admin'
+    OR (
+      id = current_user_id()
+      AND role = (SELECT role FROM profiles WHERE id = current_user_id())
+      AND (team_id IS NOT DISTINCT FROM (SELECT team_id FROM profiles WHERE id = current_user_id()))
+    )
+  );
 CREATE POLICY profiles_insert ON profiles FOR INSERT WITH CHECK (current_user_role() = 'admin');
 CREATE POLICY profiles_delete ON profiles FOR DELETE USING (current_user_role() = 'admin');
 

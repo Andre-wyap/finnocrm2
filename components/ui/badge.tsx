@@ -4,6 +4,7 @@ import type { LeadStatus, Role } from '@/types'
 const STATUS_STYLES: Record<LeadStatus, string> = {
   unassigned: 'bg-amber-100 text-amber-700',
   lead:        'bg-blue-100 text-blue-700',
+  follow_up:   'bg-orange-100 text-orange-700',
   potential:   'bg-violet-100 text-violet-700',
   closed:      'bg-teal-100 text-teal-700',
   issued:      'bg-green-100 text-green-700',
@@ -13,6 +14,7 @@ const STATUS_STYLES: Record<LeadStatus, string> = {
 const STATUS_LABELS: Record<LeadStatus, string> = {
   unassigned: 'Unassigned',
   lead:        'Lead',
+  follow_up:   'Follow-up',
   potential:   'Potential',
   closed:      'Closed',
   issued:      'Issued',

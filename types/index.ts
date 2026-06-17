@@ -1,7 +1,7 @@
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 export type Role = 'agent' | 'subadmin' | 'admin'
-export type LeadStatus = 'unassigned' | 'lead' | 'potential' | 'closed' | 'issued' | 'lost'
+export type LeadStatus = 'unassigned' | 'lead' | 'follow_up' | 'potential' | 'closed' | 'issued' | 'lost'
 export type Gender = 'male' | 'female'
 export type SmokingStatus = 'smoker' | 'non_smoker'
 export type Product = 'medical' | 'critical_illness' | 'life' | 'personal_accident'
@@ -11,7 +11,6 @@ export type ActivityType =
   | 'status_change'
   | 'field_change'
   | 'assignment'
-  | 'follow_up'
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -50,7 +49,6 @@ export interface Lead {
   assigned_by: string | null
   assigned_at: string | null
   case_size: number | null
-  next_follow_up_at: string | null
   possible_duplicate: boolean
   raw_payload: Record<string, unknown> | null
   created_at: string
@@ -66,6 +64,5 @@ export interface Activity {
   field_name: string | null
   old_value: string | null
   new_value: string | null
-  follow_up_at: string | null
   created_at: string
 }

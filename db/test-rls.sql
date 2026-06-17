@@ -146,6 +146,61 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS agent cannot see activity on other-team lead';
 
+  -- ── UPDATE / assignment WITH CHECK (§9: assign to anyone, no team limit) ────
+
+  -- Subadmin assigns a POOLED lead to an agent OUTSIDE their team.
+  -- This both writes a cross-team assignee (leads_update WITH CHECK) and fires
+  -- the AFTER trigger's status_change insert on a lead that is now invisible to
+  -- the subadmin (activities_insert). Both must succeed.
+  PERFORM set_config('app.current_user_id', v_subadmin_id::text, true);
+  UPDATE leads
+    SET assigned_agent_id = v_other_agent_id, status = 'lead'
+    WHERE id = v_lead_unassigned;
+  RAISE NOTICE 'PASS subadmin assigned pooled lead to an out-of-team user';
+
+  -- Verify the write landed (check as admin, who sees everything)
+  PERFORM set_config('app.current_user_id', v_admin_id::text, true);
+  SELECT COUNT(*) INTO v_count
+    FROM leads WHERE id = v_lead_unassigned AND assigned_agent_id = v_other_agent_id;
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'FAIL cross-team assignment did not persist';
+  END IF;
+  -- The status-change audit row was written despite the subadmin losing sight of it
+  SELECT COUNT(*) INTO v_count
+    FROM activities WHERE lead_id = v_lead_unassigned AND type = 'status_change';
+  IF v_count < 1 THEN
+    RAISE EXCEPTION 'FAIL status_change activity not logged on cross-team assignment';
+  END IF;
+  RAISE NOTICE 'PASS cross-team assignment persisted and was audited';
+
+  -- After assigning out-of-team, the subadmin can no longer see that lead
+  PERFORM set_config('app.current_user_id', v_subadmin_id::text, true);
+  SELECT COUNT(*) INTO v_count FROM leads WHERE id = v_lead_unassigned;
+  IF v_count <> 0 THEN
+    RAISE EXCEPTION 'FAIL subadmin still sees a lead assigned out of their team';
+  END IF;
+  RAISE NOTICE 'PASS subadmin loses visibility of a lead assigned out-of-team';
+
+  -- Agent CANNOT reassign their own lead away to someone else
+  PERFORM set_config('app.current_user_id', v_agent_id::text, true);
+  BEGIN
+    UPDATE leads SET assigned_agent_id = v_other_agent_id WHERE id = v_lead_mine;
+    RAISE EXCEPTION 'FAIL agent reassigned own lead away (should be blocked)';
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      RAISE NOTICE 'PASS agent cannot reassign own lead away';
+  END;
+
+  -- Agent CAN advance their own lead through the pipeline (and it is audited)
+  UPDATE leads SET status = 'follow_up' WHERE id = v_lead_mine;
+  SELECT COUNT(*) INTO v_count
+    FROM activities WHERE lead_id = v_lead_mine AND type = 'status_change'
+                      AND new_value = 'follow_up';
+  IF v_count < 1 THEN
+    RAISE EXCEPTION 'FAIL agent status change not logged';
+  END IF;
+  RAISE NOTICE 'PASS agent can advance own lead status (and it is audited)';
+
   RAISE NOTICE '';
   RAISE NOTICE '✓ All RLS checks passed';
 
