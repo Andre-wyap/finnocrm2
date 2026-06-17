@@ -70,7 +70,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     `
 
     // Filtered breakdown data for the tables.
-    const agents  = await tx<AgentRow[]>`
+    const agentsRaw = await tx<AgentRow[]>`
       SELECT * FROM get_reporting_agents(${productFilter}, ${teamFilter}::uuid, ${sourceFilter})
     `
     const teams   = await tx<TeamRow[]>`
@@ -80,20 +80,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       SELECT * FROM get_reporting_sources(${productFilter}, ${teamFilter}::uuid)
     `
 
+    // User filter applied here so the return type stays AgentRow[] not RowList.
+    const agents: AgentRow[] = userFilter
+      ? agentsRaw.filter(a => a.user_id === userFilter)
+      : [...agentsRaw]
+
     return {
       agents,
-      teams,
-      sources,
+      teams:        [...teams],
+      sources:      [...sources],
       teams_list:   teamsAll.filter(t => t.team_id != null).map(t => ({ id: t.team_id!, name: t.team_name! })),
       users_list:   usersAll.map(u => ({ id: u.id, name: u.full_name })),
       sources_list: sourcesAll.map(s => s.source),
     } satisfies ReportingData
   })
-
-  // User filter is applied post-fetch (avoids adding a 4th param to get_reporting_agents).
-  if (userFilter) {
-    data.agents = data.agents.filter(a => a.user_id === userFilter)
-  }
 
   return NextResponse.json(data)
 }
