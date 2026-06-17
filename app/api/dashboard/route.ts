@@ -8,15 +8,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (error) return error
 
   const data = await withUser(profile.id, async (tx) => {
-    const myt_today_start = tx`date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur'`
-    const myt_today_end   = tx`(date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kuala_Lumpur'`
-
     // Leads assigned today (MYT)
     const [{ new_leads_today }] = await tx<{ new_leads_today: number }[]>`
       SELECT COUNT(*)::int AS new_leads_today
       FROM leads
-      WHERE assigned_at >= ${myt_today_start}
-        AND assigned_at <  ${myt_today_end}
+      WHERE assigned_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur'
+        AND assigned_at <  (date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kuala_Lumpur'
     `
 
     // Leads that arrived today and are still in the unassigned pool (MYT)
@@ -24,8 +21,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       SELECT COUNT(*)::int AS unassigned_today
       FROM leads
       WHERE status = 'unassigned'
-        AND created_at >= ${myt_today_start}
-        AND created_at <  ${myt_today_end}
+        AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur'
+        AND created_at <  (date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kuala_Lumpur'
     `
 
     // Pipeline counts + per-stage case sizes in one pass
