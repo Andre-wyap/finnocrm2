@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Card } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { RoleBadge } from '@/components/ui/badge'
-import { Plus, Pencil, Users } from 'lucide-react'
+import { Plus, Pencil, Trash2, Users } from 'lucide-react'
 import type { Role } from '@/types'
 
 type UserRow = {
@@ -43,6 +43,9 @@ export default function ManageUsersPage() {
 
   const [addUserOpen, setAddUserOpen] = useState(false)
   const [editUser, setEditUser] = useState<UserRow | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
   const [addTeamOpen, setAddTeamOpen] = useState(false)
 
   const [form, setForm] = useState(EMPTY_USER)
@@ -138,6 +141,26 @@ export default function ManageUsersPage() {
       setFormError('Network error — please try again.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleDeleteUser() {
+    if (!deleteTarget) return
+    setDeleteError('')
+    setDeleting(true)
+    try {
+      const res = await apiFetch(`/api/admin/users/${deleteTarget.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setDeleteError(data.error ?? 'Failed to delete user.')
+        return
+      }
+      setDeleteTarget(null)
+      await load()
+    } catch {
+      setDeleteError('Network error — please try again.')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -269,12 +292,24 @@ export default function ManageUsersPage() {
                       </button>
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => openEdit(u)}
-                        className="text-text-secondary hover:text-finno-500 transition-colors p-1"
-                      >
-                        <Pencil size={15} />
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openEdit(u)}
+                          className="text-text-secondary hover:text-finno-500 transition-colors p-1"
+                          title="Edit user"
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        {u.id !== profile?.id && (
+                          <button
+                            onClick={() => { setDeleteTarget(u); setDeleteError('') }}
+                            className="text-text-secondary hover:text-red-500 transition-colors p-1"
+                            title="Delete user"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -354,6 +389,29 @@ export default function ManageUsersPage() {
             <Button type="button" variant="ghost" onClick={() => setEditUser(null)}>Cancel</Button>
           </div>
         </form>
+      </Dialog>
+
+      {/* Delete User confirmation dialog */}
+      <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete User">
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            Permanently delete <span className="font-semibold text-text-primary">{deleteTarget?.full_name}</span>?
+            Their Firebase account is removed and any leads they own become unassigned.
+            This cannot be undone — to keep lead history, deactivate them instead.
+          </p>
+          {deleteError && <p className="text-sm text-red-500">{deleteError}</p>}
+          <div className="flex gap-3 pt-1">
+            <Button
+              type="button"
+              onClick={handleDeleteUser}
+              loading={deleting}
+              className="flex-1 !bg-red-500 hover:!bg-red-600"
+            >
+              Delete User
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+          </div>
+        </div>
       </Dialog>
 
       {/* Add Team dialog */}

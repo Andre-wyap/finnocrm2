@@ -70,3 +70,59 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true })
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse> {
+  const { profile: adminProfile, error } = await requireAdmin(req)
+  if (error) return error
+
+  const { id } = await params
+
+  if (id === adminProfile.id) {
+    return NextResponse.json({ error: 'You cannot delete your own account.' }, { status: 400 })
+  }
+
+  // Resolve the Firebase UID before the row is gone.
+  const existing = await withUser(adminProfile.id, async (tx) => {
+    const rows = await tx<{ firebase_uid: string }[]>`
+      SELECT firebase_uid FROM profiles WHERE id = ${id} LIMIT 1
+    `
+    return rows[0] ?? null
+  })
+
+  if (!existing) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+
+  // Delete the profile row. leads.assigned_agent_id / assigned_by and
+  // teams.subadmin_id are ON DELETE SET NULL, but activities.user_id is
+  // ON DELETE RESTRICT — a user who has logged any activity cannot be hard
+  // deleted (we preserve lead history). Catch that FK violation (23503) and
+  // tell the admin to deactivate instead.
+  try {
+    await withUser(adminProfile.id, async (tx) => {
+      await tx`DELETE FROM profiles WHERE id = ${id}`
+    })
+  } catch (err: unknown) {
+    if ((err as { code?: string })?.code === '23503') {
+      return NextResponse.json(
+        {
+          error:
+            'This user has activity history and cannot be deleted. Deactivate them instead to preserve lead records.',
+        },
+        { status: 409 }
+      )
+    }
+    console.error('[admin/users DELETE] DB delete failed:', err)
+    return NextResponse.json({ error: 'Failed to delete user' }, { status: 500 })
+  }
+
+  // Remove the Firebase account (non-fatal — the profile is already gone, which
+  // is what the app reads; a leftover Firebase user simply can't sign in to any
+  // profile).
+  await adminAuth.deleteUser(existing.firebase_uid).catch((e) =>
+    console.error('[admin/users DELETE] Firebase delete failed:', e)
+  )
+
+  return NextResponse.json({ ok: true })
+}

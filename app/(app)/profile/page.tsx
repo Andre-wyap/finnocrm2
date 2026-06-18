@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   reauthenticateWithCredential,
   EmailAuthProvider,
-  updateEmail,
+  verifyBeforeUpdateEmail,
   updatePassword,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase/client'
@@ -117,7 +117,12 @@ function ChangeEmailSection({ onRefresh }: { onRefresh: () => Promise<void> }) {
 
       const credential = EmailAuthProvider.credential(firebaseUser.email, currentPassword)
       await reauthenticateWithCredential(firebaseUser, credential)
-      await updateEmail(firebaseUser, newEmail)
+
+      // Firebase blocks the legacy updateEmail() when email-enumeration
+      // protection is on (the default). verifyBeforeUpdateEmail() sends a
+      // confirmation link to the NEW address; the sign-in email only changes
+      // once the user clicks it. We still sync the CRM contact email now.
+      await verifyBeforeUpdateEmail(firebaseUser, newEmail)
 
       const res = await apiFetch('/api/profile', {
         method: 'PATCH',
@@ -129,13 +134,18 @@ function ChangeEmailSection({ onRefresh }: { onRefresh: () => Promise<void> }) {
       await onRefresh()
       setCurrentPassword('')
       setNewEmail('')
-      setMsg({ ok: true, text: 'Email updated.' })
+      setMsg({
+        ok: true,
+        text: `Confirmation link sent to ${newEmail}. Click it to finish changing your sign-in email, then log in with the new address.`,
+      })
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
         setMsg({ ok: false, text: 'Current password is incorrect.' })
       } else if (code === 'auth/email-already-in-use') {
         setMsg({ ok: false, text: 'That email is already in use.' })
+      } else if (code === 'auth/invalid-new-email') {
+        setMsg({ ok: false, text: 'That email address is not valid.' })
       } else {
         setMsg({ ok: false, text: 'Failed to update email. Please try again.' })
       }
