@@ -28,7 +28,7 @@ CREATE TYPE lead_status    AS ENUM ('unassigned', 'lead', 'follow_up', 'potentia
 CREATE TYPE gender         AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product        AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');
-CREATE TYPE activity_type  AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment');
+CREATE TYPE activity_type  AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore');
 
 -- ─── 2. Tables ────────────────────────────────────────────────────────────────
 CREATE TABLE teams (
@@ -71,6 +71,8 @@ CREATE TABLE leads (
   assigned_at        timestamptz,
   case_size          numeric,
   possible_duplicate boolean NOT NULL DEFAULT false,
+  archived_at        timestamptz,                    -- soft-archive (admin); NULL = active
+  archived_by        uuid REFERENCES profiles(id) ON DELETE SET NULL,
   raw_payload        jsonb,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
@@ -92,6 +94,7 @@ CREATE TABLE activities (
 CREATE INDEX idx_leads_assigned_agent  ON leads(assigned_agent_id);
 CREATE INDEX idx_leads_status          ON leads(status);
 CREATE INDEX idx_leads_mobile          ON leads(mobile);
+CREATE INDEX idx_leads_active          ON leads(created_at) WHERE archived_at IS NULL;
 CREATE INDEX idx_activities_lead_id    ON activities(lead_id);
 CREATE INDEX idx_profiles_firebase_uid ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id      ON profiles(team_id);

@@ -12,7 +12,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const [{ new_leads_today }] = await tx<{ new_leads_today: number }[]>`
       SELECT COUNT(*)::int AS new_leads_today
       FROM leads
-      WHERE assigned_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur'
+      WHERE archived_at IS NULL
+        AND assigned_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur'
         AND assigned_at <  (date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kuala_Lumpur'
     `
 
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       SELECT COUNT(*)::int AS unassigned_today
       FROM leads
       WHERE status = 'unassigned'
+        AND archived_at IS NULL
         AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur'
         AND created_at <  (date_trunc('day', NOW() AT TIME ZONE 'Asia/Kuala_Lumpur') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kuala_Lumpur'
     `
@@ -52,6 +54,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
                                                                                    AS cs_total
       FROM leads
       WHERE status NOT IN ('unassigned','lost')
+        AND archived_at IS NULL
     `
 
     return {

@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
 import {
   AlertTriangle, ArrowLeft, MessageSquare, Phone,
-  ArrowRight, Edit2, UserCheck, Send,
+  ArrowRight, Edit2, UserCheck, Send, Archive, ArchiveRestore,
 } from 'lucide-react'
 import type { LeadStatus, ActivityType } from '@/types'
 
@@ -144,6 +144,8 @@ function ActivityIcon({ type }: { type: ActivityType }) {
     status_change: <ArrowRight size={14} />,
     field_change:  <Edit2 size={14} />,
     assignment:    <UserCheck size={14} />,
+    archive:       <Archive size={14} />,
+    restore:       <ArchiveRestore size={14} />,
   }
   const bg: Record<ActivityType, string> = {
     remark:        'bg-blue-100 text-blue-600',
@@ -151,6 +153,8 @@ function ActivityIcon({ type }: { type: ActivityType }) {
     status_change: 'bg-violet-100 text-violet-600',
     field_change:  'bg-gray-100 text-gray-500',
     assignment:    'bg-finno-500/10 text-finno-500',
+    archive:       'bg-amber-100 text-amber-600',
+    restore:       'bg-green-100 text-green-600',
   }
   return (
     <span className={`flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${bg[type]}`}>

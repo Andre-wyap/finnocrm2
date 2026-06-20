@@ -11,6 +11,8 @@ export type ActivityType =
   | 'status_change'
   | 'field_change'
   | 'assignment'
+  | 'archive'
+  | 'restore'
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,8 @@ export interface Lead {
   assigned_at: string | null
   case_size: number | null
   possible_duplicate: boolean
+  archived_at: string | null
+  archived_by: string | null
   raw_payload: Record<string, unknown> | null
   created_at: string
   updated_at: string
