@@ -26,8 +26,8 @@ export async function POST(
   // Look up the target user via get_assignable_users() — SECURITY DEFINER, so
   // subadmins are not limited to their own team. Any active user is a valid target.
   const [target] = await withUser(profile.id, (tx) =>
-    tx<{ id: string; full_name: string }[]>`
-      SELECT id, full_name FROM get_assignable_users()
+    tx<{ id: string; full_name: string; team_id: string | null }[]>`
+      SELECT id, full_name, team_id FROM get_assignable_users()
       WHERE id = ${targetId}::uuid
       LIMIT 1
     `
@@ -48,11 +48,15 @@ export async function POST(
       ? `${profile.full_name} reassigned this lead to ${target.full_name}`
       : activityContent
 
+    // team_id follows the assignee's team — a no-op for in-team assignment,
+    // and how a subadmin/admin moves a lead's owning team across teams (§9).
+    // source is untouched.
     const rows = await tx<{ id: string }[]>`
       UPDATE leads
       SET assigned_agent_id = ${targetId}::uuid,
           assigned_by       = ${profile.id}::uuid,
           assigned_at       = now(),
+          team_id           = ${target.team_id}::uuid,
           status = CASE WHEN status = 'unassigned' THEN 'lead'::lead_status ELSE status END
       WHERE id = ${id}::uuid
       RETURNING id

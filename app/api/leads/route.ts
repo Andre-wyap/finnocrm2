@@ -13,6 +13,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const status = p.get('status') && VALID_STATUSES.has(p.get('status')!) ? p.get('status') : null
   const product = p.get('product') && VALID_PRODUCTS.has(p.get('product')!) ? p.get('product') : null
   const agent = p.get('agent') ?? null
+  const team = p.get('team') ?? null
   // archived: default 'false' → active only; 'true' → archived only; 'all' → both.
   const archived = p.get('archived') ?? 'false'
   const limit = Math.min(parseInt(p.get('limit') ?? '50', 10), 200)
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const statusCond = status ? tx`AND l.status = ${status}::lead_status` : tx``
     const productCond = product ? tx`AND ${product}::product = ANY(l.product_interest)` : tx``
     const agentCond = agent ? tx`AND l.assigned_agent_id = ${agent}::uuid` : tx``
+    const teamCond = team ? tx`AND l.team_id = ${team}::uuid` : tx``
     const archivedCond =
       archived === 'true' ? tx`AND l.archived_at IS NOT NULL`
       : archived === 'all' ? tx``
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
              p.full_name AS agent_name
       FROM leads l
       LEFT JOIN profiles p ON p.id = l.assigned_agent_id
-      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${archivedCond}
+      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond}
       ORDER BY l.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `
@@ -57,13 +59,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const statusCond = status ? tx`AND l.status = ${status}::lead_status` : tx``
     const productCond = product ? tx`AND ${product}::product = ANY(l.product_interest)` : tx``
     const agentCond = agent ? tx`AND l.assigned_agent_id = ${agent}::uuid` : tx``
+    const teamCond = team ? tx`AND l.team_id = ${team}::uuid` : tx``
     const archivedCond =
       archived === 'true' ? tx`AND l.archived_at IS NOT NULL`
       : archived === 'all' ? tx``
       : tx`AND l.archived_at IS NULL`
     return tx<{ total: number }[]>`
       SELECT COUNT(*)::int AS total FROM leads l
-      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${archivedCond}
+      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond}
     `
   })
 

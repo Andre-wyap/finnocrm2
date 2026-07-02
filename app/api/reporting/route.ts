@@ -59,25 +59,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const sourceFilter:  string | null = rawSource  ?? null
   const userFilter:    string | null = rawUser    && VALID_UUID.test(rawUser)   ? rawUser   : null
 
+  // A team leader's boundary — mandatory, not a UI-chosen filter. NULL for
+  // subadmin/admin (agency-wide), their own team_id for team_leader.
+  const scopeTeamId: string | null = profile.role === 'team_leader' ? profile.team_id : null
+
   const data = await withUser(profile.id, async (tx) => {
-    // Unfiltered queries for the filter-dropdown lists.
-    // The SECURITY DEFINER functions bypass subadmin's team-scoped profiles RLS,
-    // giving both roles the same full-agency dropdown options.
-    const teamsAll   = await tx<TeamRow[]>`SELECT * FROM get_reporting_teams()`
-    const sourcesAll = await tx<SourceRow[]>`SELECT * FROM get_reporting_sources()`
+    // Dropdown-list queries — scoped to the team leader's own team so the
+    // filter options never leak another team's names; unscoped (NULL) for
+    // subadmin/admin gives the same full-agency options as before.
+    const teamsAll   = await tx<TeamRow[]>`SELECT * FROM get_reporting_teams(${scopeTeamId}::uuid)`
+    const sourcesAll = await tx<SourceRow[]>`SELECT * FROM get_reporting_sources(${scopeTeamId}::uuid)`
     const usersAll   = await tx<{ id: string; full_name: string }[]>`
       SELECT id, full_name FROM get_assignable_users()
     `
 
     // Filtered breakdown data for the tables.
     const agentsRaw = await tx<AgentRow[]>`
-      SELECT * FROM get_reporting_agents(${productFilter}, ${teamFilter}::uuid, ${sourceFilter})
+      SELECT * FROM get_reporting_agents(${scopeTeamId}::uuid, ${productFilter}, ${teamFilter}::uuid, ${sourceFilter})
     `
     const teams   = await tx<TeamRow[]>`
-      SELECT * FROM get_reporting_teams(${productFilter}, ${sourceFilter})
+      SELECT * FROM get_reporting_teams(${scopeTeamId}::uuid, ${productFilter}, ${sourceFilter})
     `
     const sources = await tx<SourceRow[]>`
-      SELECT * FROM get_reporting_sources(${productFilter}, ${teamFilter}::uuid)
+      SELECT * FROM get_reporting_sources(${scopeTeamId}::uuid, ${productFilter}, ${teamFilter}::uuid)
     `
 
     // User filter applied here so the return type stays AgentRow[] not RowList.

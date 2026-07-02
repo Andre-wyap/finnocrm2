@@ -36,10 +36,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const roleLabel: Record<string, string> = {
     admin: 'Admin',
     subadmin: 'Sub-Admin',
+    team_leader: 'Team Leader',
     agent: 'Agent',
   }
 
-  const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
+  const isAdminOrSubadmin =
+    profile?.role === 'admin' || profile?.role === 'subadmin' || profile?.role === 'team_leader'
 
   const navLinks = [
     { href: '/', label: 'Dashboard', icon: LayoutDashboard },

@@ -47,10 +47,11 @@ export async function PATCH(
   await withUser(adminProfile.id, async (tx) => {
     await tx`UPDATE profiles SET ${tx(updates)} WHERE id = ${id}`
 
-    // Keep teams.subadmin_id in sync when assigning a subadmin to a team
+    // Keep teams.subadmin_id in sync when assigning a team leader to a team —
+    // team_leader, subadmin, and admin are all automatically team leaders (§3).
     const newRole = body.role ?? existing.role
     const newTeamId = 'team_id' in body ? (body.team_id ?? null) : null
-    if (newRole === 'subadmin' && newTeamId) {
+    if (['team_leader', 'subadmin', 'admin'].includes(newRole) && newTeamId) {
       await tx`UPDATE teams SET subadmin_id = ${id} WHERE id = ${newTeamId}`
     }
   })

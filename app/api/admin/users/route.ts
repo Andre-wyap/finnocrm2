@@ -47,7 +47,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!full_name || !email || !role) {
     return NextResponse.json({ error: 'full_name, email, and role are required' }, { status: 422 })
   }
-  if (!['agent', 'subadmin', 'admin'].includes(role)) {
+  if (!['agent', 'team_leader', 'subadmin', 'admin'].includes(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 422 })
   }
 
@@ -74,7 +74,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         VALUES (${firebaseUid}, ${full_name}, ${email}, ${role}, ${body.team_id ?? null})
         RETURNING id
       `
-      if (role === 'subadmin' && body.team_id) {
+      // team_leader, subadmin, and admin are all automatically team leaders (§3) —
+      // any of the three can be designated a team's leader by picking a team here.
+      if (['team_leader', 'subadmin', 'admin'].includes(role) && body.team_id) {
         await tx`UPDATE teams SET subadmin_id = ${row.id} WHERE id = ${body.team_id}`
       }
       return row.id

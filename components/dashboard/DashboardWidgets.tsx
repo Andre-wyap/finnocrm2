@@ -181,10 +181,10 @@ export function DashboardWidgets({ role }: { role: Role }) {
 
   if (fetchErr) return null
 
-  const isAdminOrSubadmin = role === 'admin' || role === 'subadmin'
+  const canSeePool = role === 'admin' || role === 'subadmin' || role === 'team_leader'
 
   return (
-    <div className={`grid gap-4 ${isAdminOrSubadmin ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'}`}>
+    <div className={`grid gap-4 ${canSeePool ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-3'}`}>
       <StatCard
         icon={UserPlus}
         label="Leads Assigned"
@@ -192,7 +192,7 @@ export function DashboardWidgets({ role }: { role: Role }) {
         sub="assigned today"
         loading={loading}
       />
-      {isAdminOrSubadmin && (
+      {canSeePool && (
         <StatCard
           icon={Inbox}
           label="Leads Unassigned"

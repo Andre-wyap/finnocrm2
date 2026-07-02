@@ -73,13 +73,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Database error' }, { status: 500 })
   }
 
+  // 5b. Resolve the owning team from the source → team map.
+  // An unmapped source leaves team_id NULL — an orphan lead visible only to
+  // subadmin/admin until an admin maps the source (or assigns it directly).
+  let team_id: string | null = null
+  try {
+    const rows = await intakeSql<{ team_id: string }[]>`
+      SELECT team_id FROM team_sources WHERE source = ${source}
+    `
+    team_id = rows[0]?.team_id ?? null
+  } catch (err) {
+    console.error('[intake] team_sources lookup failed:', err)
+    return NextResponse.json({ error: 'Database error' }, { status: 500 })
+  }
+
   // 6. Insert — intake_role has BYPASSRLS so no SET LOCAL needed
   let leadId: string
   try {
     const [row] = await intakeSql<{ id: string }[]>`
       INSERT INTO leads (
         full_name, date_of_birth, gender, smoking_status,
-        email, mobile, source, product_interest,
+        email, mobile, source, team_id, product_interest,
         status, assigned_agent_id, possible_duplicate, raw_payload
       ) VALUES (
         ${full_name},
@@ -89,6 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ${email},
         ${mobile},
         ${source},
+        ${team_id}::uuid,
         ${intakeSql.array(product_interest)}::product[],
         'unassigned',
         NULL,
@@ -103,5 +118,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Database error' }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, id: leadId, possible_duplicate })
+  return NextResponse.json({ ok: true, id: leadId, team_id, possible_duplicate })
 }

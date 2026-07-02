@@ -1,6 +1,6 @@
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
-export type Role = 'agent' | 'subadmin' | 'admin'
+export type Role = 'agent' | 'team_leader' | 'subadmin' | 'admin'
 export type LeadStatus = 'unassigned' | 'lead' | 'follow_up' | 'potential' | 'closed' | 'issued' | 'lost'
 export type Gender = 'male' | 'female'
 export type SmokingStatus = 'smoker' | 'non_smoker'
@@ -20,6 +20,13 @@ export interface Team {
   id: string
   name: string
   subadmin_id: string
+  created_at: string
+}
+
+export interface TeamSource {
+  id: string
+  team_id: string
+  source: string
   created_at: string
 }
 
@@ -45,6 +52,7 @@ export interface Lead {
   email: string | null
   state: string | null
   source: string
+  team_id: string | null
   product_interest: Product[]
   status: LeadStatus
   assigned_agent_id: string | null

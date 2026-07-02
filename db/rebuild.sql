@@ -9,10 +9,11 @@
 BEGIN;
 
 -- ─── 0. Teardown (drop wrong tables + enums) ──────────────────────────────────
-DROP TABLE IF EXISTS activities CASCADE;
-DROP TABLE IF EXISTS leads      CASCADE;
-DROP TABLE IF EXISTS profiles   CASCADE;
-DROP TABLE IF EXISTS teams      CASCADE;
+DROP TABLE IF EXISTS activities   CASCADE;
+DROP TABLE IF EXISTS leads        CASCADE;
+DROP TABLE IF EXISTS team_sources CASCADE;
+DROP TABLE IF EXISTS profiles     CASCADE;
+DROP TABLE IF EXISTS teams        CASCADE;
 
 DROP TYPE IF EXISTS activity_type  CASCADE;
 DROP TYPE IF EXISTS product        CASCADE;
@@ -23,7 +24,7 @@ DROP TYPE IF EXISTS gender         CASCADE;
 DROP TYPE IF EXISTS role           CASCADE;
 
 -- ─── 1. Enums ─────────────────────────────────────────────────────────────────
-CREATE TYPE role           AS ENUM ('agent', 'subadmin', 'admin');
+CREATE TYPE role           AS ENUM ('agent', 'team_leader', 'subadmin', 'admin');
 CREATE TYPE lead_status    AS ENUM ('unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost');
 CREATE TYPE gender         AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
@@ -54,6 +55,13 @@ ALTER TABLE teams
   ADD CONSTRAINT fk_teams_subadmin
   FOREIGN KEY (subadmin_id) REFERENCES profiles(id) ON DELETE SET NULL;
 
+CREATE TABLE team_sources (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id    uuid NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  source     text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE leads (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name          text NOT NULL,
@@ -64,6 +72,7 @@ CREATE TABLE leads (
   email              text,
   state              text,
   source             text NOT NULL,
+  team_id            uuid REFERENCES teams(id) ON DELETE SET NULL,  -- owning team; stamped at intake, follows assignment
   product_interest   product[] NOT NULL DEFAULT '{medical}',
   status             lead_status NOT NULL DEFAULT 'unassigned',
   assigned_agent_id  uuid REFERENCES profiles(id) ON DELETE SET NULL,
@@ -95,16 +104,20 @@ CREATE INDEX idx_leads_assigned_agent  ON leads(assigned_agent_id);
 CREATE INDEX idx_leads_status          ON leads(status);
 CREATE INDEX idx_leads_mobile          ON leads(mobile);
 CREATE INDEX idx_leads_active          ON leads(created_at) WHERE archived_at IS NULL;
+CREATE INDEX idx_leads_team_id         ON leads(team_id) WHERE archived_at IS NULL;
 CREATE INDEX idx_activities_lead_id    ON activities(lead_id);
 CREATE INDEX idx_profiles_firebase_uid ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id      ON profiles(team_id);
+CREATE INDEX idx_team_sources_team_id  ON team_sources(team_id);
 
 -- ─── 4. Grants (roles already exist) ──────────────────────────────────────────
-GRANT SELECT, INSERT, UPDATE, DELETE ON teams      TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON profiles   TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON leads      TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON activities TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON teams        TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON profiles     TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON leads        TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
 GRANT SELECT, INSERT ON leads TO intake_role;
+GRANT SELECT ON team_sources TO intake_role;
 
 -- ─── 5. Helper functions ──────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION current_user_id() RETURNS uuid
@@ -195,37 +208,56 @@ CREATE TRIGGER leads_audit
   FOR EACH ROW EXECUTE FUNCTION log_lead_changes();
 
 -- ─── 7. Row Level Security ────────────────────────────────────────────────────
-ALTER TABLE leads      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE profiles   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
-ALTER TABLE teams      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leads        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activities   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE teams        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE team_sources ENABLE ROW LEVEL SECURITY;
 
-ALTER TABLE leads      FORCE ROW LEVEL SECURITY;
-ALTER TABLE profiles   FORCE ROW LEVEL SECURITY;
-ALTER TABLE activities FORCE ROW LEVEL SECURITY;
-ALTER TABLE teams      FORCE ROW LEVEL SECURITY;
+ALTER TABLE leads        FORCE ROW LEVEL SECURITY;
+ALTER TABLE profiles     FORCE ROW LEVEL SECURITY;
+ALTER TABLE activities   FORCE ROW LEVEL SECURITY;
+ALTER TABLE teams        FORCE ROW LEVEL SECURITY;
+ALTER TABLE team_sources FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY leads_select ON leads FOR SELECT USING (
   CASE current_user_role()
-    WHEN 'admin'    THEN true
-    WHEN 'subadmin' THEN (
+    WHEN 'admin'       THEN true
+    WHEN 'subadmin'    THEN true
+    WHEN 'team_leader' THEN (
       assigned_agent_id = current_user_id()
-      OR status = 'unassigned'
-      OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team())
+      OR team_id = current_user_team()
     )
-    WHEN 'agent'    THEN assigned_agent_id = current_user_id()
+    WHEN 'agent'       THEN assigned_agent_id = current_user_id()
     ELSE false
   END
 );
-CREATE POLICY leads_update ON leads FOR UPDATE USING (
+CREATE POLICY leads_update ON leads FOR UPDATE
+USING (
   CASE current_user_role()
-    WHEN 'admin'    THEN true
-    WHEN 'subadmin' THEN (
+    WHEN 'admin'       THEN true
+    WHEN 'subadmin'    THEN true
+    WHEN 'team_leader' THEN (
       assigned_agent_id = current_user_id()
-      OR status = 'unassigned'
-      OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team())
+      OR team_id = current_user_team()
     )
-    WHEN 'agent'    THEN assigned_agent_id = current_user_id()
+    WHEN 'agent'       THEN assigned_agent_id = current_user_id()
+    ELSE false
+  END
+)
+WITH CHECK (
+  CASE current_user_role()
+    WHEN 'admin'       THEN true
+    WHEN 'subadmin'    THEN true
+    WHEN 'team_leader' THEN (
+      team_id = current_user_team()
+      AND (
+        assigned_agent_id IS NULL
+        OR assigned_agent_id = current_user_id()
+        OR assigned_agent_id IN (SELECT id FROM profiles WHERE team_id = current_user_team())
+      )
+    )
+    WHEN 'agent'       THEN assigned_agent_id = current_user_id()
     ELSE false
   END
 );
@@ -234,9 +266,10 @@ CREATE POLICY leads_delete ON leads FOR DELETE USING (current_user_role() = 'adm
 
 CREATE POLICY profiles_select ON profiles FOR SELECT USING (
   CASE current_user_role()
-    WHEN 'admin'    THEN true
-    WHEN 'subadmin' THEN (id = current_user_id() OR team_id = current_user_team())
-    WHEN 'agent'    THEN id = current_user_id()
+    WHEN 'admin'       THEN true
+    WHEN 'subadmin'    THEN true
+    WHEN 'team_leader' THEN (id = current_user_id() OR team_id = current_user_team())
+    WHEN 'agent'       THEN id = current_user_id()
     ELSE false
   END
 );
@@ -258,15 +291,31 @@ CREATE POLICY activities_insert ON activities FOR INSERT WITH CHECK (lead_id IN 
 
 CREATE POLICY teams_select ON teams FOR SELECT USING (
   CASE current_user_role()
-    WHEN 'admin'    THEN true
-    WHEN 'subadmin' THEN id = current_user_team()
-    WHEN 'agent'    THEN id = current_user_team()
+    WHEN 'admin'       THEN true
+    WHEN 'subadmin'    THEN true
+    WHEN 'team_leader' THEN id = current_user_team()
+    WHEN 'agent'       THEN id = current_user_team()
     ELSE false
   END
 );
 CREATE POLICY teams_insert ON teams FOR INSERT WITH CHECK (current_user_role() = 'admin');
 CREATE POLICY teams_update ON teams FOR UPDATE USING (current_user_role() = 'admin');
 CREATE POLICY teams_delete ON teams FOR DELETE USING (current_user_role() = 'admin');
+
+-- current_user_role() is cast to text so this compiles before the role enum
+-- gains 'team_leader' in a later Phase 5 slice — that branch is unreachable
+-- until then, with no follow-up edit needed once it exists.
+CREATE POLICY team_sources_select ON team_sources FOR SELECT USING (
+  CASE current_user_role()::text
+    WHEN 'admin'       THEN true
+    WHEN 'subadmin'    THEN true
+    WHEN 'team_leader' THEN team_id = current_user_team()
+    ELSE false
+  END
+);
+CREATE POLICY team_sources_insert ON team_sources FOR INSERT WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY team_sources_update ON team_sources FOR UPDATE USING (current_user_role() = 'admin');
+CREATE POLICY team_sources_delete ON team_sources FOR DELETE USING (current_user_role() = 'admin');
 
 -- ─── 8. Re-insert bootstrap admin ─────────────────────────────────────────────
 INSERT INTO profiles (firebase_uid, full_name, email, role, is_active)

@@ -22,15 +22,17 @@ const STATUS_LABELS: Record<LeadStatus, string> = {
 }
 
 const ROLE_STYLES: Record<Role, string> = {
-  admin:    'bg-finno-500/10 text-finno-500',
-  subadmin: 'bg-teal-500/10 text-teal-500',
-  agent:    'bg-gray-100 text-gray-600',
+  admin:       'bg-finno-500/10 text-finno-500',
+  subadmin:    'bg-teal-500/10 text-teal-500',
+  team_leader: 'bg-blue-100 text-blue-700',
+  agent:       'bg-gray-100 text-gray-600',
 }
 
 const ROLE_LABELS: Record<Role, string> = {
-  admin:    'Admin',
-  subadmin: 'Sub-Admin',
-  agent:    'Agent',
+  admin:       'Admin',
+  subadmin:    'Sub-Admin',
+  team_leader: 'Team Leader',
+  agent:       'Agent',
 }
 
 const pillBase = 'inline-flex items-center px-2.5 py-0.5 rounded-pill text-xs font-semibold'

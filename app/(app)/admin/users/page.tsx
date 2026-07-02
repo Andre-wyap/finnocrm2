@@ -9,8 +9,8 @@ import { Select } from '@/components/ui/select'
 import { Card } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { RoleBadge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Users } from 'lucide-react'
-import type { Role } from '@/types'
+import { Plus, Pencil, Trash2, Users, X } from 'lucide-react'
+import type { Role, TeamSource } from '@/types'
 
 type UserRow = {
   id: string
@@ -48,6 +48,12 @@ export default function ManageUsersPage() {
   const [deleteError, setDeleteError] = useState('')
   const [addTeamOpen, setAddTeamOpen] = useState(false)
 
+  const [teamSources, setTeamSources]     = useState<Record<string, TeamSource[]>>({})
+  const [sourceInputFor, setSourceInputFor] = useState<string | null>(null)
+  const [sourceInputValue, setSourceInputValue] = useState('')
+  const [sourceError, setSourceError]     = useState('')
+  const [sourceSubmitting, setSourceSubmitting] = useState(false)
+
   const [form, setForm] = useState(EMPTY_USER)
   const [teamName, setTeamName] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -62,7 +68,18 @@ export default function ManageUsersPage() {
       apiFetch('/api/admin/teams').then((r) => r.json()),
     ])
     setUsers(Array.isArray(u) ? u : [])
-    setTeams(Array.isArray(t) ? t : [])
+    const teamList: TeamRow[] = Array.isArray(t) ? t : []
+    setTeams(teamList)
+
+    const sourceEntries = await Promise.all(
+      teamList.map(async (team) => {
+        const res = await apiFetch(`/api/admin/teams/${team.id}/sources`)
+        const sources = res.ok ? await res.json() : []
+        return [team.id, Array.isArray(sources) ? sources : []] as const
+      })
+    )
+    setTeamSources(Object.fromEntries(sourceEntries))
+
     setLoading(false)
   }, [])
 
@@ -195,6 +212,38 @@ export default function ManageUsersPage() {
     }
   }
 
+  // ── Team ↔ source map ───────────────────────────────────────────────────────
+
+  async function handleAddSource(teamId: string) {
+    const source = sourceInputValue.trim()
+    if (!source) return
+    setSourceSubmitting(true)
+    setSourceError('')
+    try {
+      const res = await apiFetch(`/api/admin/teams/${teamId}/sources`, {
+        method: 'POST',
+        body: JSON.stringify({ source }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setSourceError(data.error ?? 'Failed to add source'); return }
+      setSourceInputFor(null)
+      setSourceInputValue('')
+      await load()
+    } catch {
+      setSourceError('Network error — please try again.')
+    } finally {
+      setSourceSubmitting(false)
+    }
+  }
+
+  async function handleRemoveSource(teamId: string, sourceId: string) {
+    await apiFetch(`/api/admin/teams/${teamId}/sources`, {
+      method: 'DELETE',
+      body: JSON.stringify({ source_id: sourceId }),
+    })
+    await load()
+  }
+
   // ── Shared form fields ───────────────────────────────────────────────────────
 
   const renderUserFormFields = (showEmail?: boolean) => (
@@ -222,20 +271,24 @@ export default function ManageUsersPage() {
         onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role, team_id: '' }))}
       >
         <option value="agent">Agent</option>
+        <option value="team_leader">Team Leader</option>
         <option value="subadmin">Sub-Admin</option>
         <option value="admin">Admin</option>
       </Select>
-      {form.role !== 'admin' && (
-        <Select
-          label="Team"
-          value={form.team_id}
-          onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}
-        >
-          <option value="">— No team —</option>
-          {teams.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </Select>
+      <Select
+        label="Team"
+        value={form.team_id}
+        onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}
+      >
+        <option value="">— No team —</option>
+        {teams.map((t) => (
+          <option key={t.id} value={t.id}>{t.name}</option>
+        ))}
+      </Select>
+      {(form.role === 'team_leader' || form.role === 'subadmin' || form.role === 'admin') && form.team_id && (
+        <p className="text-xs text-text-secondary -mt-2">
+          Picking a team here also makes this user that team&apos;s leader.
+        </p>
       )}
       {formError && <p className="text-sm text-red-500">{formError}</p>}
     </div>
@@ -336,11 +389,68 @@ export default function ManageUsersPage() {
               <Card key={t.id} className="p-5">
                 <p className="font-bold text-text-primary">{t.name}</p>
                 <p className="text-sm text-text-secondary mt-1">
-                  Subadmin: {t.subadmin_name ?? <span className="italic">Not assigned</span>}
+                  Team Leader: {t.subadmin_name ?? <span className="italic">Not assigned</span>}
                 </p>
                 <div className="flex items-center gap-1.5 mt-3 text-xs text-text-secondary">
                   <Users size={13} />
                   {t.agent_count} agent{t.agent_count !== 1 ? 's' : ''}
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">
+                    Sources
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(teamSources[t.id] ?? []).length === 0 ? (
+                      <span className="text-xs text-text-secondary italic">No sources mapped</span>
+                    ) : (
+                      teamSources[t.id].map((s) => (
+                        <span
+                          key={s.id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill text-xs font-medium bg-finno-500/8 text-finno-500"
+                        >
+                          {s.source}
+                          <button
+                            onClick={() => handleRemoveSource(t.id, s.id)}
+                            className="hover:text-red-500"
+                            aria-label={`Remove ${s.source}`}
+                          >
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  {sourceInputFor === t.id ? (
+                    <div className="flex items-center gap-2 mt-2">
+                      <Input
+                        value={sourceInputValue}
+                        onChange={(e) => setSourceInputValue(e.target.value)}
+                        placeholder="e.g. medical-lp"
+                        className="h-8 text-xs"
+                      />
+                      <Button size="sm" loading={sourceSubmitting} onClick={() => handleAddSource(t.id)}>
+                        Add
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => { setSourceInputFor(null); setSourceInputValue(''); setSourceError('') }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setSourceInputFor(t.id); setSourceInputValue(''); setSourceError('') }}
+                      className="text-xs text-finno-500 hover:underline mt-2"
+                    >
+                      + Add source
+                    </button>
+                  )}
+                  {sourceError && sourceInputFor === t.id && (
+                    <p className="text-xs text-red-500 mt-1">{sourceError}</p>
+                  )}
                 </div>
               </Card>
             ))}

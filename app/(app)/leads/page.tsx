@@ -25,6 +25,11 @@ type AssignableUser = {
   team_name: string | null
 }
 
+type TeamOption = {
+  id: string
+  name: string
+}
+
 const STATUS_OPTS = [
   { value: '',           label: 'All Statuses' },
   { value: 'lead',       label: 'Lead' },
@@ -48,7 +53,12 @@ const LIMIT = 50
 export default function LeadsPage() {
   const router = useRouter()
   const { profile } = useAuth()
-  const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
+  // team_leader can access the page (RLS locks their view to their own team
+  // already); the team filter itself is admin/subadmin-only below, since a
+  // team_leader has nothing to filter — they only ever see one team.
+  const canAccessPage =
+    profile?.role === 'admin' || profile?.role === 'subadmin' || profile?.role === 'team_leader'
+  const canFilterByTeam = profile?.role === 'admin' || profile?.role === 'subadmin'
 
   const [leads,   setLeads]   = useState<LeadRow[]>([])
   const [total,   setTotal]   = useState(0)
@@ -58,8 +68,10 @@ export default function LeadsPage() {
   const [statusFilter,  setStatusFilter]  = useState('')
   const [productFilter, setProductFilter] = useState('')
   const [agentFilter,   setAgentFilter]   = useState('')
+  const [teamFilter,    setTeamFilter]    = useState('')
 
   const [users, setUsers] = useState<AssignableUser[]>([])
+  const [teamOptions, setTeamOptions] = useState<TeamOption[]>([])
 
   // Bulk selection
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set())
@@ -94,6 +106,7 @@ export default function LeadsPage() {
     if (statusFilter)  params.set('status',  statusFilter)
     if (productFilter) params.set('product', productFilter)
     if (agentFilter)   params.set('agent',   agentFilter)
+    if (teamFilter)    params.set('team',    teamFilter)
     const res  = await apiFetch(`/api/leads?${params}`)
     const data = await res.json()
     if (res.ok) {
@@ -102,18 +115,23 @@ export default function LeadsPage() {
       setOffset(off)
     }
     setLoading(false)
-  }, [statusFilter, productFilter, agentFilter])
+  }, [statusFilter, productFilter, agentFilter, teamFilter])
 
   useEffect(() => {
-    if (profile && !isAdminOrSubadmin) { router.replace('/'); return }
+    if (profile && !canAccessPage) { router.replace('/'); return }
     load(0)
     setSelectedIds(new Set())
-  }, [profile, isAdminOrSubadmin, load, router])
+  }, [profile, canAccessPage, load, router])
 
   useEffect(() => {
-    if (!isAdminOrSubadmin) return
+    if (!canAccessPage) return
     apiFetch('/api/agents').then((r) => r.json()).then(setUsers).catch(() => {})
-  }, [isAdminOrSubadmin])
+  }, [canAccessPage])
+
+  useEffect(() => {
+    if (!canFilterByTeam) return
+    apiFetch('/api/teams').then((r) => r.json()).then(setTeamOptions).catch(() => {})
+  }, [canFilterByTeam])
 
   async function handleBulkAssign() {
     if (!bulkAgent || selectedIds.size === 0) return
@@ -137,9 +155,9 @@ export default function LeadsPage() {
     }
   }
 
-  if (!isAdminOrSubadmin) return null
+  if (!canAccessPage) return null
 
-  const hasFilters = statusFilter || productFilter || agentFilter
+  const hasFilters = statusFilter || productFilter || agentFilter || teamFilter
 
   return (
     <div className="space-y-5">
@@ -181,9 +199,21 @@ export default function LeadsPage() {
               </option>
             ))}
           </Select>
+          {canFilterByTeam && (
+            <Select
+              value={teamFilter}
+              onChange={(e) => setTeamFilter(e.target.value)}
+              className="h-9 text-xs w-36"
+            >
+              <option value="">All Teams</option>
+              {teamOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </Select>
+          )}
           {hasFilters && (
             <button
-              onClick={() => { setStatusFilter(''); setProductFilter(''); setAgentFilter('') }}
+              onClick={() => { setStatusFilter(''); setProductFilter(''); setAgentFilter(''); setTeamFilter('') }}
               className="text-xs text-finno-500 hover:underline shrink-0"
             >
               Clear

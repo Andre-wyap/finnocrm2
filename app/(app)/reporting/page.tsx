@@ -163,7 +163,8 @@ export default function ReportingPage() {
   const router  = useRouter()
   const { profile } = useAuth()
   const isAdmin = profile?.role === 'admin'
-  const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
+  const isAdminOrSubadmin =
+    profile?.role === 'admin' || profile?.role === 'subadmin' || profile?.role === 'team_leader'
 
   const [data, setData]       = useState<ReportingData | null>(null)
   const [loading, setLoading] = useState(true)

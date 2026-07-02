@@ -42,7 +42,8 @@ const LIMIT = 50
 export default function UnassignedPage() {
   const router = useRouter()
   const { profile } = useAuth()
-  const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
+  const canAccessPage =
+    profile?.role === 'admin' || profile?.role === 'subadmin' || profile?.role === 'team_leader'
 
   const [leads,   setLeads]   = useState<LeadRow[]>([])
   const [total,   setTotal]   = useState(0)
@@ -95,10 +96,10 @@ export default function UnassignedPage() {
   }, [])
 
   useEffect(() => {
-    if (!isAdminOrSubadmin) { router.replace('/'); return }
+    if (!canAccessPage) { router.replace('/'); return }
     load(0)
     apiFetch('/api/agents').then((r) => r.json()).then(setAgents).catch(() => {})
-  }, [isAdminOrSubadmin, load, router])
+  }, [canAccessPage, load, router])
 
   // Single-lead assign
   async function handleAssign(leadId: string) {
@@ -145,7 +146,7 @@ export default function UnassignedPage() {
     }
   }
 
-  if (!isAdminOrSubadmin) return null
+  if (!canAccessPage) return null
 
   return (
     <div className="space-y-5">

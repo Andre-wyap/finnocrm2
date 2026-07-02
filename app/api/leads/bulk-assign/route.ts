@@ -6,7 +6,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { profile, error } = await requireAuth(req)
   if (error) return error
 
-  if (profile.role !== 'admin' && profile.role !== 'subadmin') {
+  if (profile.role === 'agent') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -28,8 +28,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Validate target user via SECURITY DEFINER (bypasses profile SELECT RLS)
   const [target] = await withUser(profile.id, (tx) =>
-    tx<{ id: string; full_name: string }[]>`
-      SELECT id, full_name FROM get_assignable_users() WHERE id = ${agent_id}::uuid LIMIT 1
+    tx<{ id: string; full_name: string; team_id: string | null }[]>`
+      SELECT id, full_name, team_id FROM get_assignable_users() WHERE id = ${agent_id}::uuid LIMIT 1
     `
   )
   if (!target) return NextResponse.json({ error: 'Invalid agent_id' }, { status: 422 })
@@ -48,6 +48,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           WHERE  id = ANY(${leadIds}::uuid[])
         ),
         updated AS (
+          -- team_id follows the assignee's team for every lead in the batch
+          -- (no-op in-team, or how a subadmin/admin moves ownership across
+          -- teams — §9). source is untouched.
           UPDATE leads
           SET    assigned_agent_id = ${agent_id}::uuid,
                  status            = CASE WHEN status = 'unassigned'
@@ -55,7 +58,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                                           ELSE status
                                      END,
                  assigned_by       = ${profile.id}::uuid,
-                 assigned_at       = NOW()
+                 assigned_at       = NOW(),
+                 team_id           = ${target.team_id}::uuid
           WHERE  id = ANY(${leadIds}::uuid[])
           RETURNING id
         ),
