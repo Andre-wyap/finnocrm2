@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import type { TeamSource } from '@/types'
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { profile, error } = await requireAdmin(req)
@@ -16,22 +17,49 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       member_count: number
       lead_count: number
       source_count: number
+      sources: TeamSource[]
       created_at: string
     }[]>`
       SELECT t.id, t.name, t.created_at,
              sp.id   AS subadmin_id,
              sp.full_name AS subadmin_name,
-             COUNT(DISTINCT a.id)::int  AS agent_count,
-             COUNT(DISTINCT m.id)::int  AS member_count,
-             COUNT(DISTINCT l.id)::int  AS lead_count,
-             COUNT(DISTINCT ts.id)::int AS source_count
+             COALESCE(members.agent_count, 0)::int AS agent_count,
+             COALESCE(members.member_count, 0)::int AS member_count,
+             COALESCE(leads.lead_count, 0)::int AS lead_count,
+             COALESCE(sources.source_count, 0)::int AS source_count,
+             COALESCE(sources.items, '[]'::json) AS sources
       FROM teams t
       LEFT JOIN profiles sp ON sp.id = t.subadmin_id
-      LEFT JOIN profiles a  ON a.team_id = t.id AND a.role = 'agent' AND a.is_active = true
-      LEFT JOIN profiles m  ON m.team_id = t.id
-      LEFT JOIN leads l     ON l.team_id = t.id
-      LEFT JOIN team_sources ts ON ts.team_id = t.id
-      GROUP BY t.id, t.name, t.created_at, sp.id, sp.full_name
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::int AS member_count,
+          COUNT(*) FILTER (WHERE role = 'agent' AND is_active = true)::int AS agent_count
+        FROM profiles p
+        WHERE p.team_id = t.id
+      ) members ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS lead_count
+        FROM leads l
+        WHERE l.team_id = t.id
+      ) leads ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*)::int AS source_count,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'id', ts.id,
+                'team_id', ts.team_id,
+                'source', ts.source,
+                'created_at', ts.created_at
+              )
+              ORDER BY ts.source
+            ),
+            '[]'::json
+          ) AS items
+        FROM team_sources ts
+        WHERE ts.team_id = t.id
+      ) sources ON true
       ORDER BY t.name
     `
   )

@@ -5,6 +5,7 @@
 
 CREATE OR REPLACE FUNCTION current_user_id() RETURNS uuid
   LANGUAGE sql STABLE
+  SET search_path = public, pg_temp
 AS $$
   SELECT current_setting('app.current_user_id', true)::uuid
 $$;
@@ -13,6 +14,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION current_user_role() RETURNS role
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
   SELECT role FROM profiles WHERE id = current_user_id()
 $$;
@@ -21,6 +23,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION current_user_team() RETURNS uuid
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
   SELECT team_id FROM profiles WHERE id = current_user_id()
 $$;
@@ -29,6 +32,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION set_updated_at()
   RETURNS trigger LANGUAGE plpgsql
+  SET search_path = public, pg_temp
 AS $$
 BEGIN
   NEW.updated_at = now();
@@ -47,6 +51,7 @@ CREATE TRIGGER leads_updated_at
 
 CREATE OR REPLACE FUNCTION log_lead_changes()
   RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_user_id uuid := current_user_id();
@@ -129,6 +134,7 @@ CREATE TRIGGER leads_audit
 CREATE OR REPLACE FUNCTION get_profile_by_firebase_uid(p_uid text)
   RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid)
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
   SELECT id, full_name, email, role, team_id
   FROM profiles
@@ -137,6 +143,7 @@ AS $$
   LIMIT 1;
 $$;
 
+REVOKE ALL ON FUNCTION get_profile_by_firebase_uid(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_profile_by_firebase_uid(text) TO app_user;
 
 -- ─── Assignment picker: role-aware assignable users ──────────────────────────
@@ -147,6 +154,7 @@ GRANT EXECUTE ON FUNCTION get_profile_by_firebase_uid(text) TO app_user;
 CREATE OR REPLACE FUNCTION get_assignable_users()
   RETURNS TABLE (id uuid, full_name text, role role, team_id uuid, team_name text)
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
   SELECT p.id, p.full_name, p.role, p.team_id, t.name AS team_name
   FROM profiles p
@@ -159,6 +167,7 @@ AS $$
   ORDER BY p.full_name;
 $$;
 
+REVOKE ALL ON FUNCTION get_assignable_users() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_assignable_users() TO app_user;
 
 -- ─── Reporting breakdowns (agent / team / source) ────────────────────────────
@@ -188,6 +197,7 @@ RETURNS TABLE (
   case_size       numeric
 )
 LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT
     p.id                                                                           AS user_id,
@@ -226,6 +236,7 @@ RETURNS TABLE (
   case_size   numeric
 )
 LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT
     t.id                                                                           AS team_id,
@@ -255,6 +266,7 @@ RETURNS TABLE (
   case_size   numeric
 )
 LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
   SELECT
     l.source,
@@ -272,6 +284,18 @@ AS $$
   ORDER BY total_count DESC;
 $$;
 
+REVOKE ALL ON FUNCTION current_user_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION current_user_role() FROM PUBLIC;
+REVOKE ALL ON FUNCTION current_user_team() FROM PUBLIC;
+REVOKE ALL ON FUNCTION set_updated_at() FROM PUBLIC;
+REVOKE ALL ON FUNCTION log_lead_changes() FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_reporting_agents(uuid, text, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_reporting_teams(uuid, text, text)        FROM PUBLIC;
+REVOKE ALL ON FUNCTION get_reporting_sources(uuid, text, uuid)      FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION current_user_id() TO app_user;
+GRANT EXECUTE ON FUNCTION current_user_role() TO app_user;
+GRANT EXECUTE ON FUNCTION current_user_team() TO app_user;
 GRANT EXECUTE ON FUNCTION get_reporting_agents(uuid, text, uuid, text) TO app_user;
 GRANT EXECUTE ON FUNCTION get_reporting_teams(uuid, text, text)        TO app_user;
 GRANT EXECUTE ON FUNCTION get_reporting_sources(uuid, text, uuid)      TO app_user;

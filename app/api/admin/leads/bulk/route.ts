@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuidArray } from '@/lib/validation'
 
 // Admin-only bulk maintenance for leads: archive (soft-hide, recoverable),
 // restore, and permanent delete. Archive/restore log an audit activity per lead;
@@ -26,8 +27,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!Array.isArray(lead_ids) || lead_ids.length === 0) {
     return NextResponse.json({ error: 'lead_ids must be a non-empty array' }, { status: 422 })
   }
+  if (!isUuidArray(lead_ids)) {
+    return NextResponse.json({ error: 'lead_ids must contain only valid UUIDs' }, { status: 422 })
+  }
 
-  const leadIds = lead_ids as string[]
+  const leadIds = lead_ids
 
   try {
     if (action === 'archive') {

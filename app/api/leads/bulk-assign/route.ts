@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuid, isUuidArray } from '@/lib/validation'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { profile, error } = await requireAuth(req)
@@ -23,8 +24,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (typeof agent_id !== 'string' || !agent_id) {
     return NextResponse.json({ error: 'agent_id is required' }, { status: 422 })
   }
+  if (!isUuid(agent_id)) {
+    return NextResponse.json({ error: 'Invalid agent_id' }, { status: 422 })
+  }
+  if (!isUuidArray(lead_ids)) {
+    return NextResponse.json({ error: 'lead_ids must contain only valid UUIDs' }, { status: 422 })
+  }
 
-  const leadIds = lead_ids as string[]
+  const leadIds = lead_ids
 
   // Validate target user via SECURITY DEFINER (bypasses profile SELECT RLS)
   const [target] = await withUser(profile.id, (tx) =>

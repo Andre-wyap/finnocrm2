@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuid } from '@/lib/validation'
 import type { TeamSource } from '@/types'
 
 export async function GET(
@@ -11,6 +12,9 @@ export async function GET(
   if (error) return error
 
   const { id: teamId } = await params
+  if (!isUuid(teamId)) {
+    return NextResponse.json({ error: 'Invalid team id' }, { status: 400 })
+  }
 
   const rows = await withUser(profile.id, (tx) =>
     tx<TeamSource[]>`
@@ -32,6 +36,9 @@ export async function POST(
   if (error) return error
 
   const { id: teamId } = await params
+  if (!isUuid(teamId)) {
+    return NextResponse.json({ error: 'Invalid team id' }, { status: 400 })
+  }
 
   let body: { source?: string }
   try { body = await req.json() } catch {
@@ -71,6 +78,9 @@ export async function DELETE(
   if (error) return error
 
   const { id: teamId } = await params
+  if (!isUuid(teamId)) {
+    return NextResponse.json({ error: 'Invalid team id' }, { status: 400 })
+  }
 
   let body: { source_id?: string }
   try { body = await req.json() } catch {
@@ -79,6 +89,7 @@ export async function DELETE(
 
   const sourceId = body.source_id
   if (!sourceId) return NextResponse.json({ error: 'source_id is required' }, { status: 422 })
+  if (!isUuid(sourceId)) return NextResponse.json({ error: 'Invalid source_id' }, { status: 422 })
 
   await withUser(profile.id, (tx) =>
     tx`DELETE FROM team_sources WHERE id = ${sourceId}::uuid AND team_id = ${teamId}::uuid`

@@ -7,11 +7,15 @@ type ValidProduct = (typeof VALID_PRODUCTS)[number]
 const INTAKE_SECRET = process.env.INTAKE_SECRET
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // 1. Shared-secret check — Elementor sends X-Intake-Secret on every webhook
-  if (INTAKE_SECRET) {
-    if (request.headers.get('x-intake-secret') !== INTAKE_SECRET) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  // 1. Shared-secret check — n8n/WordPress must send X-Intake-Secret.
+  // Missing server config fails closed so intake never becomes public by accident.
+  if (!INTAKE_SECRET) {
+    console.error('[intake] INTAKE_SECRET is not configured')
+    return NextResponse.json({ error: 'Intake is not configured' }, { status: 500 })
+  }
+
+  if (request.headers.get('x-intake-secret') !== INTAKE_SECRET) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   // 2. Parse body

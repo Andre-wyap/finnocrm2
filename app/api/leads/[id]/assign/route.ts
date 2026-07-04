@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuid } from '@/lib/validation'
 
 export async function POST(
   req: NextRequest,
@@ -14,6 +15,9 @@ export async function POST(
   }
 
   const { id } = await params
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: 'Invalid lead id' }, { status: 400 })
+  }
 
   let body: { agent_id?: string }
   try { body = await req.json() } catch {
@@ -22,6 +26,7 @@ export async function POST(
 
   const targetId = body.agent_id?.trim()
   if (!targetId) return NextResponse.json({ error: 'agent_id is required' }, { status: 422 })
+  if (!isUuid(targetId)) return NextResponse.json({ error: 'Invalid agent_id' }, { status: 422 })
 
   // Look up the target user via get_assignable_users() — SECURITY DEFINER, so
   // subadmins are not limited to their own team. Any active user is a valid target.

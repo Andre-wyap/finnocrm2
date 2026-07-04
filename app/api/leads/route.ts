@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuid } from '@/lib/validation'
 
 const VALID_STATUSES = new Set(['unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
 const VALID_PRODUCTS = new Set(['medical', 'critical_illness', 'life', 'personal_accident'])
@@ -16,8 +17,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const team = p.get('team') ?? null
   // archived: default 'false' → active only; 'true' → archived only; 'all' → both.
   const archived = p.get('archived') ?? 'false'
-  const limit = Math.min(parseInt(p.get('limit') ?? '50', 10), 200)
-  const offset = parseInt(p.get('offset') ?? '0', 10)
+  const parsedLimit = Number.parseInt(p.get('limit') ?? '50', 10)
+  const parsedOffset = Number.parseInt(p.get('offset') ?? '0', 10)
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 50
+  const offset = Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0
+
+  if (agent && !isUuid(agent)) {
+    return NextResponse.json({ error: 'Invalid agent filter' }, { status: 422 })
+  }
+  if (team && !isUuid(team)) {
+    return NextResponse.json({ error: 'Invalid team filter' }, { status: 422 })
+  }
 
   const leads = await withUser(profile.id, async (tx) => {
     const statusCond = status ? tx`AND l.status = ${status}::lead_status` : tx``

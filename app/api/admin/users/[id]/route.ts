@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import { adminAuth } from '@/lib/firebase/admin'
+import { isUuid } from '@/lib/validation'
 import type { Role } from '@/types'
+
+const VALID_ROLES = new Set<Role>(['agent', 'team_leader', 'subadmin', 'admin'])
+const TEAM_LEADER_ROLES = new Set<Role>(['team_leader', 'subadmin', 'admin'])
 
 export async function PATCH(
   req: NextRequest,
@@ -12,6 +16,9 @@ export async function PATCH(
   if (error) return error
 
   const { id } = await params
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: 'Invalid user id' }, { status: 400 })
+  }
 
   let body: {
     full_name?: string
@@ -23,21 +30,52 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const normalizedFullName = body.full_name !== undefined ? body.full_name.trim() : undefined
+  if (normalizedFullName !== undefined && !normalizedFullName) {
+    return NextResponse.json({ error: 'full_name cannot be empty' }, { status: 422 })
+  }
+  if (body.role !== undefined && !VALID_ROLES.has(body.role)) {
+    return NextResponse.json({ error: 'Invalid role' }, { status: 422 })
+  }
+  if (body.is_active !== undefined && typeof body.is_active !== 'boolean') {
+    return NextResponse.json({ error: 'is_active must be a boolean' }, { status: 422 })
+  }
+
+  const hasTeamId = 'team_id' in body
+  if (hasTeamId && body.team_id !== null && body.team_id !== undefined && typeof body.team_id !== 'string') {
+    return NextResponse.json({ error: 'team_id must be a UUID or null' }, { status: 422 })
+  }
+  const normalizedTeamId = hasTeamId
+    ? typeof body.team_id === 'string' && body.team_id.trim() !== ''
+      ? body.team_id.trim()
+      : null
+    : undefined
+  if (normalizedTeamId !== undefined && normalizedTeamId !== null && !isUuid(normalizedTeamId)) {
+    return NextResponse.json({ error: 'Invalid team_id' }, { status: 422 })
+  }
+
   // Fetch current state (need firebase_uid for potential disable)
   const existing = await withUser(adminProfile.id, async (tx) => {
-    const rows = await tx<{ firebase_uid: string; is_active: boolean; role: Role }[]>`
-      SELECT firebase_uid, is_active, role FROM profiles WHERE id = ${id} LIMIT 1
+    const rows = await tx<{ firebase_uid: string; is_active: boolean; role: Role; team_id: string | null }[]>`
+      SELECT firebase_uid, is_active, role, team_id FROM profiles WHERE id = ${id}::uuid LIMIT 1
     `
     return rows[0] ?? null
   })
 
   if (!existing) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
+  if (normalizedTeamId) {
+    const [team] = await withUser(adminProfile.id, (tx) =>
+      tx<{ id: string }[]>`SELECT id FROM teams WHERE id = ${normalizedTeamId}::uuid LIMIT 1`
+    )
+    if (!team) return NextResponse.json({ error: 'team_id does not exist' }, { status: 422 })
+  }
+
   // Build update object — only include provided fields
   const updates: Record<string, unknown> = {}
-  if (body.full_name !== undefined) updates.full_name = body.full_name.trim()
+  if (normalizedFullName !== undefined) updates.full_name = normalizedFullName
   if (body.role !== undefined) updates.role = body.role
-  if ('team_id' in body) updates.team_id = body.team_id ?? null
+  if (hasTeamId) updates.team_id = normalizedTeamId ?? null
   if (body.is_active !== undefined) updates.is_active = body.is_active
 
   if (Object.keys(updates).length === 0) {
@@ -45,14 +83,19 @@ export async function PATCH(
   }
 
   await withUser(adminProfile.id, async (tx) => {
-    await tx`UPDATE profiles SET ${tx(updates)} WHERE id = ${id}`
+    await tx`UPDATE profiles SET ${tx(updates)} WHERE id = ${id}::uuid`
 
-    // Keep teams.subadmin_id in sync when assigning a team leader to a team —
-    // team_leader, subadmin, and admin are all automatically team leaders (§3).
+    // Keep teams.subadmin_id in sync when a team leader is assigned, moved,
+    // demoted, or deactivated.
     const newRole = body.role ?? existing.role
-    const newTeamId = 'team_id' in body ? (body.team_id ?? null) : null
-    if (['team_leader', 'subadmin', 'admin'].includes(newRole) && newTeamId) {
-      await tx`UPDATE teams SET subadmin_id = ${id} WHERE id = ${newTeamId}`
+    const newTeamId = hasTeamId ? (normalizedTeamId ?? null) : existing.team_id
+    const newIsActive = body.is_active ?? existing.is_active
+
+    if (!newIsActive || !TEAM_LEADER_ROLES.has(newRole) || !newTeamId) {
+      await tx`UPDATE teams SET subadmin_id = NULL WHERE subadmin_id = ${id}::uuid`
+    } else {
+      await tx`UPDATE teams SET subadmin_id = NULL WHERE subadmin_id = ${id}::uuid AND id <> ${newTeamId}::uuid`
+      await tx`UPDATE teams SET subadmin_id = ${id}::uuid WHERE id = ${newTeamId}::uuid`
     }
   })
 
@@ -80,6 +123,9 @@ export async function DELETE(
   if (error) return error
 
   const { id } = await params
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: 'Invalid user id' }, { status: 400 })
+  }
 
   if (id === adminProfile.id) {
     return NextResponse.json({ error: 'You cannot delete your own account.' }, { status: 400 })
@@ -88,7 +134,7 @@ export async function DELETE(
   // Resolve the Firebase UID before the row is gone.
   const existing = await withUser(adminProfile.id, async (tx) => {
     const rows = await tx<{ firebase_uid: string }[]>`
-      SELECT firebase_uid FROM profiles WHERE id = ${id} LIMIT 1
+      SELECT firebase_uid FROM profiles WHERE id = ${id}::uuid LIMIT 1
     `
     return rows[0] ?? null
   })
@@ -102,7 +148,7 @@ export async function DELETE(
   // tell the admin to deactivate instead.
   try {
     await withUser(adminProfile.id, async (tx) => {
-      await tx`DELETE FROM profiles WHERE id = ${id}`
+      await tx`DELETE FROM profiles WHERE id = ${id}::uuid`
     })
   } catch (err: unknown) {
     if ((err as { code?: string })?.code === '23503') {

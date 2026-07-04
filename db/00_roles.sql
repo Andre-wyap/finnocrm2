@@ -15,5 +15,13 @@ CREATE ROLE intake_role WITH LOGIN PASSWORD 'REPLACE_WITH_STRONG_PASSWORD' BYPAS
 GRANT CONNECT ON DATABASE finno_crm TO app_user;
 GRANT CONNECT ON DATABASE finno_crm TO intake_role;
 
+-- Lock down the public schema: app roles may use existing objects, but must
+-- not be able to create or replace objects there.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE CREATE ON SCHEMA public FROM app_user;
+REVOKE CREATE ON SCHEMA public FROM intake_role;
+GRANT USAGE ON SCHEMA public TO app_user;
+GRANT USAGE ON SCHEMA public TO intake_role;
+
 -- Note: table-level GRANTs (SELECT, INSERT, UPDATE, DELETE) are run in
 -- 01_schema.sql after the tables exist. Run that file next.

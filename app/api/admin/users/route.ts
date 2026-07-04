@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import { adminAuth } from '@/lib/firebase/admin'
+import { isUuid } from '@/lib/validation'
 import type { Role } from '@/types'
+
+const VALID_ROLES = new Set<Role>(['agent', 'team_leader', 'subadmin', 'admin'])
+const TEAM_LEADER_ROLES = new Set<Role>(['team_leader', 'subadmin', 'admin'])
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { profile, error } = await requireAdmin(req)
@@ -43,12 +47,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const full_name = body.full_name?.trim() ?? ''
   const email = body.email?.trim() ?? ''
   const role = body.role
+  if (body.team_id !== null && body.team_id !== undefined && typeof body.team_id !== 'string') {
+    return NextResponse.json({ error: 'team_id must be a UUID or null' }, { status: 422 })
+  }
+  const teamId = typeof body.team_id === 'string' && body.team_id.trim() !== ''
+    ? body.team_id.trim()
+    : null
 
   if (!full_name || !email || !role) {
     return NextResponse.json({ error: 'full_name, email, and role are required' }, { status: 422 })
   }
-  if (!['agent', 'team_leader', 'subadmin', 'admin'].includes(role)) {
+  if (!VALID_ROLES.has(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 422 })
+  }
+  if (teamId && !isUuid(teamId)) {
+    return NextResponse.json({ error: 'Invalid team_id' }, { status: 422 })
+  }
+
+  if (teamId) {
+    const [team] = await withUser(adminProfile.id, (tx) =>
+      tx<{ id: string }[]>`SELECT id FROM teams WHERE id = ${teamId}::uuid LIMIT 1`
+    )
+    if (!team) return NextResponse.json({ error: 'team_id does not exist' }, { status: 422 })
   }
 
   // 1. Create Firebase Auth user
@@ -71,13 +91,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     profileId = await withUser(adminProfile.id, async (tx) => {
       const [row] = await tx<{ id: string }[]>`
         INSERT INTO profiles (firebase_uid, full_name, email, role, team_id)
-        VALUES (${firebaseUid}, ${full_name}, ${email}, ${role}, ${body.team_id ?? null})
+        VALUES (${firebaseUid}, ${full_name}, ${email}, ${role}, ${teamId}::uuid)
         RETURNING id
       `
       // team_leader, subadmin, and admin are all automatically team leaders (§3) —
       // any of the three can be designated a team's leader by picking a team here.
-      if (['team_leader', 'subadmin', 'admin'].includes(role) && body.team_id) {
-        await tx`UPDATE teams SET subadmin_id = ${row.id} WHERE id = ${body.team_id}`
+      if (TEAM_LEADER_ROLES.has(role) && teamId) {
+        await tx`UPDATE teams SET subadmin_id = ${row.id}::uuid WHERE id = ${teamId}::uuid`
       }
       return row.id
     })

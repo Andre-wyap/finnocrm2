@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuid } from '@/lib/validation'
 
 type AgentRow = {
   user_id: string
@@ -37,7 +38,6 @@ export type ReportingData = {
   sources_list: string[]
 }
 
-const VALID_UUID     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const VALID_PRODUCTS = new Set(['medical', 'critical_illness', 'life', 'personal_accident'])
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -54,10 +54,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const rawSource  = p.get('source')  ?? null
   const rawUser    = p.get('user')    ?? null
 
-  const productFilter: string | null = rawProduct && VALID_PRODUCTS.has(rawProduct) ? rawProduct : null
-  const teamFilter:    string | null = rawTeam    && VALID_UUID.test(rawTeam)   ? rawTeam   : null
+  if (rawProduct && !VALID_PRODUCTS.has(rawProduct)) {
+    return NextResponse.json({ error: 'Invalid product filter' }, { status: 422 })
+  }
+  if (rawTeam && !isUuid(rawTeam)) {
+    return NextResponse.json({ error: 'Invalid team filter' }, { status: 422 })
+  }
+  if (rawUser && !isUuid(rawUser)) {
+    return NextResponse.json({ error: 'Invalid user filter' }, { status: 422 })
+  }
+
+  const productFilter: string | null = rawProduct
+  const teamFilter:    string | null = rawTeam
   const sourceFilter:  string | null = rawSource  ?? null
-  const userFilter:    string | null = rawUser    && VALID_UUID.test(rawUser)   ? rawUser   : null
+  const userFilter:    string | null = rawUser
 
   // A team leader's boundary — mandatory, not a UI-chosen filter. NULL for
   // subadmin/admin (agency-wide), their own team_id for team_leader.

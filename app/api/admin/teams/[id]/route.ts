@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
+import { isUuid } from '@/lib/validation'
 
 type TeamDeleteSummary = {
   id: string
@@ -18,19 +19,33 @@ export async function DELETE(
   if (error) return error
 
   const { id } = await params
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: 'Invalid team id' }, { status: 400 })
+  }
 
   const [team] = await withUser(profile.id, (tx) =>
     tx<TeamDeleteSummary[]>`
       SELECT t.id, t.name,
-             COUNT(DISTINCT p.id)::int  AS member_count,
-             COUNT(DISTINCT l.id)::int  AS lead_count,
-             COUNT(DISTINCT ts.id)::int AS source_count
+             COALESCE(members.member_count, 0)::int AS member_count,
+             COALESCE(leads.lead_count, 0)::int AS lead_count,
+             COALESCE(sources.source_count, 0)::int AS source_count
       FROM teams t
-      LEFT JOIN profiles p ON p.team_id = t.id
-      LEFT JOIN leads l ON l.team_id = t.id
-      LEFT JOIN team_sources ts ON ts.team_id = t.id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS member_count
+        FROM profiles p
+        WHERE p.team_id = t.id
+      ) members ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS lead_count
+        FROM leads l
+        WHERE l.team_id = t.id
+      ) leads ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS source_count
+        FROM team_sources ts
+        WHERE ts.team_id = t.id
+      ) sources ON true
       WHERE t.id = ${id}::uuid
-      GROUP BY t.id, t.name
       LIMIT 1
     `
   )

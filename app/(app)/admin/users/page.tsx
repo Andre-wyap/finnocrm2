@@ -33,6 +33,7 @@ type TeamRow = {
   member_count: number
   lead_count: number
   source_count: number
+  sources: TeamSource[]
 }
 
 const EMPTY_USER = { full_name: '', email: '', role: 'agent' as Role, team_id: '' }
@@ -54,7 +55,6 @@ export default function ManageUsersPage() {
   const [deletingTeam, setDeletingTeam] = useState(false)
   const [deleteTeamError, setDeleteTeamError] = useState('')
 
-  const [teamSources, setTeamSources]     = useState<Record<string, TeamSource[]>>({})
   const [sourceInputFor, setSourceInputFor] = useState<string | null>(null)
   const [sourceInputValue, setSourceInputValue] = useState('')
   const [sourceError, setSourceError]     = useState('')
@@ -74,17 +74,7 @@ export default function ManageUsersPage() {
       apiFetch('/api/admin/teams').then((r) => r.json()),
     ])
     setUsers(Array.isArray(u) ? u : [])
-    const teamList: TeamRow[] = Array.isArray(t) ? t : []
-    setTeams(teamList)
-
-    const sourceEntries = await Promise.all(
-      teamList.map(async (team) => {
-        const res = await apiFetch(`/api/admin/teams/${team.id}/sources`)
-        const sources = res.ok ? await res.json() : []
-        return [team.id, Array.isArray(sources) ? sources : []] as const
-      })
-    )
-    setTeamSources(Object.fromEntries(sourceEntries))
+    setTeams(Array.isArray(t) ? t : [])
 
     setLoading(false)
   }, [])
@@ -441,10 +431,10 @@ export default function ManageUsersPage() {
                     Sources
                   </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {(teamSources[t.id] ?? []).length === 0 ? (
+                    {(t.sources ?? []).length === 0 ? (
                       <span className="text-xs text-text-secondary italic">No sources mapped</span>
                     ) : (
-                      teamSources[t.id].map((s) => (
+                      t.sources.map((s) => (
                         <span
                           key={s.id}
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill text-xs font-medium bg-finno-500/8 text-finno-500"

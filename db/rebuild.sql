@@ -118,34 +118,45 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
 GRANT SELECT, INSERT ON leads TO intake_role;
 GRANT SELECT ON team_sources TO intake_role;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE CREATE ON SCHEMA public FROM app_user;
+REVOKE CREATE ON SCHEMA public FROM intake_role;
+GRANT USAGE ON SCHEMA public TO app_user;
+GRANT USAGE ON SCHEMA public TO intake_role;
 
 -- ─── 5. Helper functions ──────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION current_user_id() RETURNS uuid
   LANGUAGE sql STABLE
+  SET search_path = public, pg_temp
 AS $$ SELECT current_setting('app.current_user_id', true)::uuid $$;
 
 CREATE OR REPLACE FUNCTION current_user_role() RETURNS role
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$ SELECT role FROM profiles WHERE id = current_user_id() $$;
 
 CREATE OR REPLACE FUNCTION current_user_team() RETURNS uuid
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$ SELECT team_id FROM profiles WHERE id = current_user_id() $$;
 
 CREATE OR REPLACE FUNCTION get_profile_by_firebase_uid(p_uid text)
   RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid)
   LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
   SELECT id, full_name, email, role, team_id
   FROM profiles
   WHERE firebase_uid = p_uid AND is_active = true
   LIMIT 1;
 $$;
+REVOKE ALL ON FUNCTION get_profile_by_firebase_uid(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_profile_by_firebase_uid(text) TO app_user;
 
 -- ─── 6. Triggers ──────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION set_updated_at()
   RETURNS trigger LANGUAGE plpgsql
+  SET search_path = public, pg_temp
 AS $$ BEGIN NEW.updated_at = now(); RETURN NEW; END; $$;
 
 CREATE TRIGGER leads_updated_at
@@ -154,6 +165,7 @@ CREATE TRIGGER leads_updated_at
 
 CREATE OR REPLACE FUNCTION log_lead_changes()
   RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_user_id uuid := current_user_id();
@@ -206,6 +218,16 @@ $$;
 CREATE TRIGGER leads_audit
   AFTER UPDATE ON leads
   FOR EACH ROW EXECUTE FUNCTION log_lead_changes();
+
+REVOKE ALL ON FUNCTION current_user_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION current_user_role() FROM PUBLIC;
+REVOKE ALL ON FUNCTION current_user_team() FROM PUBLIC;
+REVOKE ALL ON FUNCTION set_updated_at() FROM PUBLIC;
+REVOKE ALL ON FUNCTION log_lead_changes() FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION current_user_id() TO app_user;
+GRANT EXECUTE ON FUNCTION current_user_role() TO app_user;
+GRANT EXECUTE ON FUNCTION current_user_team() TO app_user;
 
 -- ─── 7. Row Level Security ────────────────────────────────────────────────────
 ALTER TABLE leads        ENABLE ROW LEVEL SECURITY;

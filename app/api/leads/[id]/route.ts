@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import sql from '@/lib/db/client'
+import { isUuid } from '@/lib/validation'
 import type { LeadStatus } from '@/types'
 
 const VALID_STATUSES = new Set<string>(['unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
@@ -40,6 +41,9 @@ export async function GET(
   if (error) return error
 
   const { id } = await params
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: 'Invalid lead id' }, { status: 400 })
+  }
 
   const rows = await withUser(profile.id, (tx) =>
     tx<LeadDetail[]>`
@@ -65,6 +69,9 @@ export async function PATCH(
   if (error) return error
 
   const { id } = await params
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: 'Invalid lead id' }, { status: 400 })
+  }
 
   let body: {
     full_name?: string
@@ -102,7 +109,11 @@ export async function PATCH(
   }
 
   const updates: Record<string, unknown> = {}
-  if (body.full_name !== undefined) updates.full_name = body.full_name.trim()
+  if (body.full_name !== undefined) {
+    const fullName = body.full_name.trim()
+    if (!fullName) return NextResponse.json({ error: 'full_name cannot be empty' }, { status: 422 })
+    updates.full_name = fullName
+  }
   if (body.date_of_birth !== undefined) updates.date_of_birth = body.date_of_birth ?? null
   if (body.gender !== undefined) updates.gender = body.gender ?? null
   if (body.smoking_status !== undefined) updates.smoking_status = body.smoking_status ?? null
