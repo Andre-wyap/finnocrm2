@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
 import {
-  AlertTriangle, ArrowLeft, MessageSquare, Phone,
+  AlertTriangle, ArrowLeft, MessageCircle, MessageSquare, Phone,
   ArrowRight, Edit2, UserCheck, Send, Archive, ArchiveRestore,
 } from 'lucide-react'
 import type { LeadStatus, ActivityType } from '@/types'
@@ -93,6 +93,14 @@ const FIELD_LABELS: Record<string, string> = {
   product_interest: 'Product Interest',
 }
 
+const QUICK_REMARKS = [
+  'No pick up',
+  'Already whatsapp',
+  'Appointment set',
+  'Not health',
+  'General remark',
+]
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatActivityTime(ts: string): string {
@@ -133,6 +141,17 @@ function leadToDraft(lead: LeadDetail): FormDraft {
     case_size: lead.case_size !== null ? String(lead.case_size) : '',
     status: lead.status,
   }
+}
+
+function whatsappUrl(mobile: string): string | null {
+  const trimmed = mobile.trim()
+  if (!trimmed) return null
+
+  const digits = trimmed.replace(/\D/g, '')
+  if (!digits) return null
+
+  const normalized = digits.startsWith('0') ? `60${digits.slice(1)}` : digits
+  return `https://wa.me/${normalized}`
 }
 
 // ── Activity icon ─────────────────────────────────────────────────────────────
@@ -208,6 +227,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [quickRemark, setQuickRemark] = useState('')
   const [remarkText, setRemarkText] = useState('')
   const [remarkSubmitting, setRemarkSubmitting] = useState(false)
   const [agents, setAgents] = useState<AssignableUser[]>([])
@@ -305,14 +325,17 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
   async function handleAddRemark() {
     const content = remarkText.trim()
-    if (!content) return
+    const quick = quickRemark.trim()
+    const remarkContent = [quick, content].filter(Boolean).join(': ')
+    if (!remarkContent) return
     setRemarkSubmitting(true)
     try {
       const res = await apiFetch(`/api/leads/${id}/activities`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content: remarkContent }),
       })
       if (res.ok) {
+        setQuickRemark('')
         setRemarkText('')
         await loadActivities()
         remarkRef.current?.focus()
@@ -392,6 +415,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       </div>
     )
   }
+
+  const leadWhatsappUrl = whatsappUrl(lead.mobile)
 
   return (
     <div>
@@ -479,6 +504,17 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             onChange={(e) => setField('mobile', e.target.value)}
             required
           />
+
+          {leadWhatsappUrl && (
+            <a
+              href={leadWhatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-button bg-teal-500 px-4 text-sm font-semibold text-white transition-all duration-200 ease-out hover:bg-teal-600 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2"
+            >
+              <MessageCircle size={16} /> WhatsApp
+            </a>
+          )}
 
           <Input
             label="Email"
@@ -663,6 +699,16 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
           {/* Add remark */}
           <div className="space-y-2">
+            <Select
+              label="Quick remark"
+              value={quickRemark}
+              onChange={(e) => setQuickRemark(e.target.value)}
+            >
+              <option value="">Select quick remark…</option>
+              {QUICK_REMARKS.map((remark) => (
+                <option key={remark} value={remark}>{remark}</option>
+              ))}
+            </Select>
             <textarea
               ref={remarkRef}
               value={remarkText}
@@ -678,7 +724,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               size="sm"
               variant="outline"
               onClick={handleAddRemark}
-              disabled={!remarkText.trim()}
+              disabled={!quickRemark.trim() && !remarkText.trim()}
               loading={remarkSubmitting}
               className="flex items-center gap-1.5"
             >
