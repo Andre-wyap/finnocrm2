@@ -13,15 +13,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       subadmin_id: string | null
       subadmin_name: string | null
       agent_count: number
+      member_count: number
+      lead_count: number
+      source_count: number
       created_at: string
     }[]>`
       SELECT t.id, t.name, t.created_at,
              sp.id   AS subadmin_id,
              sp.full_name AS subadmin_name,
-             COUNT(a.id)::int AS agent_count
+             COUNT(DISTINCT a.id)::int  AS agent_count,
+             COUNT(DISTINCT m.id)::int  AS member_count,
+             COUNT(DISTINCT l.id)::int  AS lead_count,
+             COUNT(DISTINCT ts.id)::int AS source_count
       FROM teams t
       LEFT JOIN profiles sp ON sp.id = t.subadmin_id
       LEFT JOIN profiles a  ON a.team_id = t.id AND a.role = 'agent' AND a.is_active = true
+      LEFT JOIN profiles m  ON m.team_id = t.id
+      LEFT JOIN leads l     ON l.team_id = t.id
+      LEFT JOIN team_sources ts ON ts.team_id = t.id
       GROUP BY t.id, t.name, t.created_at, sp.id, sp.full_name
       ORDER BY t.name
     `

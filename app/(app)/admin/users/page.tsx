@@ -30,6 +30,9 @@ type TeamRow = {
   subadmin_id: string | null
   subadmin_name: string | null
   agent_count: number
+  member_count: number
+  lead_count: number
+  source_count: number
 }
 
 const EMPTY_USER = { full_name: '', email: '', role: 'agent' as Role, team_id: '' }
@@ -47,6 +50,9 @@ export default function ManageUsersPage() {
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
   const [addTeamOpen, setAddTeamOpen] = useState(false)
+  const [deleteTeamTarget, setDeleteTeamTarget] = useState<TeamRow | null>(null)
+  const [deletingTeam, setDeletingTeam] = useState(false)
+  const [deleteTeamError, setDeleteTeamError] = useState('')
 
   const [teamSources, setTeamSources]     = useState<Record<string, TeamSource[]>>({})
   const [sourceInputFor, setSourceInputFor] = useState<string | null>(null)
@@ -209,6 +215,26 @@ export default function ManageUsersPage() {
       setFormError('Network error — please try again.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleDeleteTeam() {
+    if (!deleteTeamTarget) return
+    setDeleteTeamError('')
+    setDeletingTeam(true)
+    try {
+      const res = await apiFetch(`/api/admin/teams/${deleteTeamTarget.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setDeleteTeamError(data.error ?? 'Failed to delete team.')
+        return
+      }
+      setDeleteTeamTarget(null)
+      await load()
+    } catch {
+      setDeleteTeamError('Network error — please try again.')
+    } finally {
+      setDeletingTeam(false)
     }
   }
 
@@ -387,14 +413,28 @@ export default function ManageUsersPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {teams.map((t) => (
               <Card key={t.id} className="p-5">
-                <p className="font-bold text-text-primary">{t.name}</p>
-                <p className="text-sm text-text-secondary mt-1">
-                  Team Leader: {t.subadmin_name ?? <span className="italic">Not assigned</span>}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-text-primary truncate">{t.name}</p>
+                    <p className="text-sm text-text-secondary mt-1">
+                      Team Leader: {t.subadmin_name ?? <span className="italic">Not assigned</span>}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setDeleteTeamTarget(t); setDeleteTeamError('') }}
+                    className="text-text-secondary hover:text-red-500 transition-colors p-1 shrink-0"
+                    title="Delete team"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
                 <div className="flex items-center gap-1.5 mt-3 text-xs text-text-secondary">
                   <Users size={13} />
                   {t.agent_count} agent{t.agent_count !== 1 ? 's' : ''}
                 </div>
+                <p className="text-xs text-text-secondary mt-1">
+                  {t.member_count} member{t.member_count !== 1 ? 's' : ''} · {t.lead_count} lead{t.lead_count !== 1 ? 's' : ''}
+                </p>
 
                 <div className="mt-3 pt-3 border-t border-border">
                   <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">
@@ -540,6 +580,34 @@ export default function ManageUsersPage() {
             <Button type="button" variant="ghost" onClick={() => setAddTeamOpen(false)}>Cancel</Button>
           </div>
         </form>
+      </Dialog>
+
+      {/* Delete Team confirmation dialog */}
+      <Dialog open={!!deleteTeamTarget} onClose={() => setDeleteTeamTarget(null)} title="Delete Team">
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            Permanently delete <span className="font-semibold text-text-primary">{deleteTeamTarget?.name}</span>?
+            This removes its source mappings and clears the team from assigned users and leads.
+            Lead records and activity history are kept.
+          </p>
+          <div className="rounded-button bg-surface-subtle border border-border p-3 text-sm text-text-secondary">
+            <p>{deleteTeamTarget?.member_count ?? 0} member{deleteTeamTarget?.member_count === 1 ? '' : 's'} will have no team.</p>
+            <p>{deleteTeamTarget?.lead_count ?? 0} lead{deleteTeamTarget?.lead_count === 1 ? '' : 's'} will become orphan team leads.</p>
+            <p>{deleteTeamTarget?.source_count ?? 0} source mapping{deleteTeamTarget?.source_count === 1 ? '' : 's'} will be removed.</p>
+          </div>
+          {deleteTeamError && <p className="text-sm text-red-500">{deleteTeamError}</p>}
+          <div className="flex gap-3 pt-1">
+            <Button
+              type="button"
+              onClick={handleDeleteTeam}
+              loading={deletingTeam}
+              className="flex-1 !bg-red-500 hover:!bg-red-600"
+            >
+              Delete Team
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setDeleteTeamTarget(null)}>Cancel</Button>
+          </div>
+        </div>
       </Dialog>
     </div>
   )
