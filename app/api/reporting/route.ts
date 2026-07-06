@@ -77,20 +77,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Dropdown-list queries — scoped to the team leader's own team so the
     // filter options never leak another team's names; unscoped (NULL) for
     // subadmin/admin gives the same full-agency options as before.
-    const teamsAll   = await tx<TeamRow[]>`SELECT * FROM get_reporting_teams(${scopeTeamId}::uuid)`
-    const sourcesAll = await tx<SourceRow[]>`SELECT * FROM get_reporting_sources(${scopeTeamId}::uuid)`
-    const usersAll   = await tx<{ id: string; full_name: string }[]>`
-      SELECT id, full_name FROM get_assignable_users()
+    const teamsAll = await tx<{ id: string; name: string }[]>`
+      SELECT id, name
+      FROM teams
+      ORDER BY name
+    `
+    const sourceOptions = await tx<{ source: string }[]>`
+      SELECT source
+      FROM (
+        SELECT source FROM team_sources
+        UNION
+        SELECT source FROM get_reporting_sources(${scopeTeamId}::uuid)
+      ) available_sources
+      WHERE source IS NOT NULL
+      ORDER BY source
+    `
+    const usersAll = await tx<{ id: string; full_name: string; team_id: string | null }[]>`
+      SELECT id, full_name, team_id FROM get_assignable_users()
     `
 
     // Filtered breakdown data for the tables.
     const agentsRaw = await tx<AgentRow[]>`
       SELECT * FROM get_reporting_agents(${scopeTeamId}::uuid, ${productFilter}, ${teamFilter}::uuid, ${sourceFilter})
     `
-    const teams   = await tx<TeamRow[]>`
+    const teamsRaw = await tx<TeamRow[]>`
       SELECT * FROM get_reporting_teams(${scopeTeamId}::uuid, ${productFilter}, ${sourceFilter})
     `
-    const sources = await tx<SourceRow[]>`
+    const sourcesRaw = await tx<SourceRow[]>`
       SELECT * FROM get_reporting_sources(${scopeTeamId}::uuid, ${productFilter}, ${teamFilter}::uuid)
     `
 
@@ -98,14 +111,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const agents: AgentRow[] = userFilter
       ? agentsRaw.filter(a => a.user_id === userFilter)
       : [...agentsRaw]
+    const teams: TeamRow[] = teamFilter
+      ? teamsRaw.filter(t => t.team_id === teamFilter)
+      : [...teamsRaw]
+    const sources: SourceRow[] = sourceFilter
+      ? sourcesRaw.filter(s => s.source === sourceFilter)
+      : [...sourcesRaw]
+    const users = teamFilter
+      ? usersAll.filter(u => u.team_id === teamFilter)
+      : usersAll
 
     return {
       agents,
       teams:        [...teams],
       sources:      [...sources],
-      teams_list:   teamsAll.filter(t => t.team_id != null).map(t => ({ id: t.team_id!, name: t.team_name! })),
-      users_list:   usersAll.map(u => ({ id: u.id, name: u.full_name })),
-      sources_list: sourcesAll.map(s => s.source),
+      teams_list:   teamsAll.map(t => ({ id: t.id, name: t.name })),
+      users_list:   users.map(u => ({ id: u.id, name: u.full_name })),
+      sources_list: sourceOptions.map(s => s.source),
     } satisfies ReportingData
   })
 

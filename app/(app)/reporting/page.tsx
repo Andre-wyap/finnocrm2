@@ -162,8 +162,8 @@ const PRODUCT_OPTS = [
 export default function ReportingPage() {
   const router  = useRouter()
   const { profile } = useAuth()
-  const isAdmin = profile?.role === 'admin'
-  const isAdminOrSubadmin =
+  const canUseAgencyFilters = profile?.role === 'admin' || profile?.role === 'subadmin'
+  const canAccessReporting =
     profile?.role === 'admin' || profile?.role === 'subadmin' || profile?.role === 'team_leader'
 
   const [data, setData]       = useState<ReportingData | null>(null)
@@ -196,14 +196,14 @@ export default function ReportingPage() {
   }, [productFilter, teamFilter, sourceFilter, userFilter])
 
   useEffect(() => {
-    if (profile && !isAdminOrSubadmin) {
+    if (profile && !canAccessReporting) {
       router.replace('/')
       return
     }
     load()
-  }, [profile, isAdminOrSubadmin, load, router])
+  }, [profile, canAccessReporting, load, router])
 
-  if (!isAdminOrSubadmin) return null
+  if (!canAccessReporting) return null
 
   const hasFilters = productFilter || teamFilter || sourceFilter || userFilter
 
@@ -237,7 +237,7 @@ export default function ReportingPage() {
               ))}
             </FilterSelect>
 
-            {isAdmin && (
+            {canUseAgencyFilters && (
               <>
                 <FilterSelect value={teamFilter} onChange={(v) => { setTeamFilter(v); setUserFilter('') }}>
                   <option value="">All Teams</option>
