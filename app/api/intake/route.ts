@@ -6,6 +6,47 @@ type ValidProduct = (typeof VALID_PRODUCTS)[number]
 
 const INTAKE_SECRET = process.env.INTAKE_SECRET
 
+function isValidDateParts(year: number, month: number, day: number): boolean {
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  )
+}
+
+function normalizeDateOfBirth(value: unknown): { value: string | null; error?: string } {
+  if (value === null || value === undefined || value === '') return { value: null }
+  if (typeof value !== 'string') return { value: null, error: 'date_of_birth must be a string' }
+
+  const raw = value.trim()
+  if (!raw) return { value: null }
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/)
+  if (iso) {
+    const [, y, m, d] = iso
+    const year = Number(y)
+    const month = Number(m)
+    const day = Number(d)
+    if (isValidDateParts(year, month, day)) return { value: `${y}-${m}-${d}` }
+  }
+
+  const malaysia = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
+  if (malaysia) {
+    const [, d, m, y] = malaysia
+    const year = Number(y)
+    const month = Number(m)
+    const day = Number(d)
+    if (isValidDateParts(year, month, day)) {
+      return {
+        value: `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      }
+    }
+  }
+
+  return { value: null, error: 'date_of_birth must be YYYY-MM-DD or DD/MM/YYYY' }
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1. Shared-secret check — n8n/WordPress must send X-Intake-Secret.
   // Missing server config fails closed so intake never becomes public by accident.
@@ -35,8 +76,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // 4. Optional fields — validate or default
-  const date_of_birth =
-    typeof body.date_of_birth === 'string' && body.date_of_birth ? body.date_of_birth : null
+  const parsedDateOfBirth = normalizeDateOfBirth(body.date_of_birth)
+  if (parsedDateOfBirth.error) {
+    return NextResponse.json({ error: parsedDateOfBirth.error }, { status: 422 })
+  }
+  const date_of_birth = parsedDateOfBirth.value
   const gender = body.gender === 'male' || body.gender === 'female' ? (body.gender as string) : null
   const smoking_status =
     body.smoking_status === 'smoker' || body.smoking_status === 'non_smoker'
