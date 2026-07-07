@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import { adminAuth } from '@/lib/firebase/admin'
+import { createInviteLink, getInviteExpiryHours } from '@/lib/invites'
 import { isUuid } from '@/lib/validation'
 import type { Role } from '@/types'
 
@@ -112,10 +113,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 3. Generate password-setup link (non-fatal if it fails)
   let inviteLink: string | null = null
   try {
-    inviteLink = await adminAuth.generatePasswordResetLink(email)
+    inviteLink = createInviteLink(req.nextUrl.origin, firebaseUid, email)
   } catch (err) {
     console.error('[admin/users POST] Failed to generate invite link:', err)
   }
 
-  return NextResponse.json({ id: profileId, inviteLink }, { status: 201 })
+  return NextResponse.json({ id: profileId, inviteLink, expiresInHours: getInviteExpiryHours() }, { status: 201 })
 }

@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Card } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
 import { RoleBadge } from '@/components/ui/badge'
-import { Plus, Pencil, Trash2, Users, X } from 'lucide-react'
+import { Mail, Plus, Pencil, Trash2, Users, X } from 'lucide-react'
 import type { Role, TeamSource } from '@/types'
 
 type UserRow = {
@@ -65,7 +65,13 @@ export default function ManageUsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState('')
   const [inviteLink, setInviteLink] = useState<string | null>(null)
+  const [inviteExpiryHours, setInviteExpiryHours] = useState<number>(24)
   const [copied, setCopied] = useState(false)
+  const [resendTarget, setResendTarget] = useState<UserRow | null>(null)
+  const [resendLink, setResendLink] = useState<string | null>(null)
+  const [resendError, setResendError] = useState('')
+  const [resendingUserId, setResendingUserId] = useState<string | null>(null)
+  const [resendCopied, setResendCopied] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -108,6 +114,7 @@ export default function ManageUsersPage() {
       const data = await res.json()
       if (!res.ok) { setFormError(data.error ?? 'Failed to create user'); return }
       setInviteLink(data.inviteLink)
+      setInviteExpiryHours(data.expiresInHours ?? 24)
       await load()
     } catch {
       setFormError('Network error — please try again.')
@@ -121,6 +128,7 @@ export default function ManageUsersPage() {
     setForm(EMPTY_USER)
     setFormError('')
     setInviteLink(null)
+    setInviteExpiryHours(24)
     setCopied(false)
   }
 
@@ -183,6 +191,28 @@ export default function ManageUsersPage() {
       body: JSON.stringify({ is_active: !u.is_active }),
     })
     await load()
+  }
+
+  async function handleResendInvite(u: UserRow) {
+    setResendTarget(u)
+    setResendLink(null)
+    setResendError('')
+    setResendCopied(false)
+    setResendingUserId(u.id)
+    try {
+      const res = await apiFetch(`/api/admin/users/${u.id}/invite`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        setResendError(data.error ?? 'Failed to resend invite.')
+        return
+      }
+      setInviteExpiryHours(data.expiresInHours ?? 24)
+      setResendLink(data.inviteLink)
+    } catch {
+      setResendError('Network error — please try again.')
+    } finally {
+      setResendingUserId(null)
+    }
   }
 
   // ── Add Team ────────────────────────────────────────────────────────────────
@@ -363,6 +393,14 @@ export default function ManageUsersPage() {
                     <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
+                          onClick={() => handleResendInvite(u)}
+                          disabled={resendingUserId === u.id}
+                          className="text-text-secondary hover:text-finno-500 transition-colors p-1 disabled:opacity-50"
+                          title="Resend invite link"
+                        >
+                          <Mail size={15} />
+                        </button>
+                        <button
                           onClick={() => openEdit(u)}
                           className="text-text-secondary hover:text-finno-500 transition-colors p-1"
                           title="Edit user"
@@ -494,7 +532,7 @@ export default function ManageUsersPage() {
           <div className="space-y-4">
             <p className="text-sm text-green-600 font-medium">✓ User created successfully!</p>
             <p className="text-sm text-text-secondary">
-              Send this invite link to the new user so they can set their password:
+              Send this invite link to the new user so they can set their password. It expires in {inviteExpiryHours} hours.
             </p>
             <div className="bg-surface-subtle rounded-button p-3 text-xs text-text-secondary font-mono break-all select-all">
               {inviteLink}
@@ -518,6 +556,36 @@ export default function ManageUsersPage() {
             </div>
           </form>
         )}
+      </Dialog>
+
+      {/* Resend invite dialog */}
+      <Dialog open={!!resendTarget} onClose={() => setResendTarget(null)} title="Resend Invite">
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            {resendLink
+              ? `Send this fresh invite link to ${resendTarget?.full_name}. It expires in ${inviteExpiryHours} hours.`
+              : `Generating a fresh invite link for ${resendTarget?.full_name}...`}
+          </p>
+          {resendError && <p className="text-sm text-red-500">{resendError}</p>}
+          {resendLink && (
+            <>
+              <div className="bg-surface-subtle rounded-button p-3 text-xs text-text-secondary font-mono break-all select-all">
+                {resendLink}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => { navigator.clipboard.writeText(resendLink); setResendCopied(true) }}
+              >
+                {resendCopied ? '✓ Copied!' : 'Copy Invite Link'}
+              </Button>
+            </>
+          )}
+          <Button className="w-full" onClick={() => setResendTarget(null)}>
+            Done
+          </Button>
+        </div>
       </Dialog>
 
       {/* Edit User dialog */}
