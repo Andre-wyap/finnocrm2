@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/client'
 import { useAuth } from '@/lib/auth/context'
-import { LogOut, Users, LayoutDashboard, UserCircle, ClipboardList, BarChart2, ShieldAlert } from 'lucide-react'
+import { LogOut, Users, LayoutDashboard, UserCircle, ClipboardList, BarChart2, ShieldAlert, Menu, X } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
@@ -13,10 +13,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const { user, profile, loading } = useAuth()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login')
   }, [user, loading, router])
+
+  // Close the mobile menu whenever the route changes.
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [pathname])
 
   if (loading) {
     return (
@@ -66,6 +72,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Top nav */}
       <header className="h-14 bg-finno-800 px-4 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-6">
+          {/* Mobile burger toggle */}
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="sm:hidden text-white/80 hover:text-white transition-colors p-1.5 -ml-1.5 rounded-md hover:bg-white/10"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+          >
+            {menuOpen ? <X size={20} strokeWidth={2} /> : <Menu size={20} strokeWidth={2} />}
+          </button>
           <span className="text-white font-extrabold tracking-tight text-lg select-none">
             FINNO.
           </span>
@@ -106,6 +121,49 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </header>
+
+      {/* Mobile menu — slides open below the header, hidden on sm+ */}
+      {menuOpen && (
+        <>
+          <div
+            className="sm:hidden fixed inset-0 top-14 bg-black/30 z-30"
+            onClick={() => setMenuOpen(false)}
+            aria-hidden="true"
+          />
+          <nav className="sm:hidden fixed top-14 inset-x-0 z-40 bg-finno-800 border-t border-white/10 shadow-lg px-4 py-3 flex flex-col gap-1">
+            {profile ? (
+              <div className="px-3 py-2 mb-1 border-b border-white/10">
+                <p className="text-white text-sm font-medium leading-tight">{profile.full_name}</p>
+                <p className="text-white/50 text-xs leading-tight">
+                  {roleLabel[profile.role] ?? profile.role}
+                </p>
+              </div>
+            ) : null}
+            {navLinks.map(({ href, label, icon: Icon }) => (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium transition-colors',
+                  (href === '/' ? pathname === '/' : pathname.startsWith(href))
+                    ? 'bg-white/15 text-white'
+                    : 'text-white/70 hover:text-white hover:bg-white/10'
+                )}
+              >
+                <Icon size={17} strokeWidth={2} />
+                {label}
+              </Link>
+            ))}
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 transition-colors text-left"
+            >
+              <LogOut size={17} strokeWidth={2} />
+              Sign out
+            </button>
+          </nav>
+        </>
+      )}
 
       {/* Page content */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 py-6">{children}</main>
