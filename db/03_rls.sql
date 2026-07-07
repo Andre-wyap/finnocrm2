@@ -21,11 +21,17 @@ ALTER TABLE team_sources FORCE ROW LEVEL SECURITY;
 -- SELECT
 -- Agent: own assigned only. Team leader: own assigned (even cross-team) OR
 -- their team's leads (team_id stamped at intake — this is also their
--- team-scoped unassigned pool). Subadmin/admin: agency-wide, no restriction.
+-- team-scoped unassigned pool). Subadmin: agency-wide EXCEPT leads assigned to
+-- a different subadmin or to any admin (they always still see their own). Admin:
+-- everything, no restriction.
 CREATE POLICY leads_select ON leads FOR SELECT USING (
   CASE current_user_role()
     WHEN 'admin'       THEN true
-    WHEN 'subadmin'    THEN true
+    WHEN 'subadmin'    THEN (
+      assigned_agent_id IS NULL
+      OR assigned_agent_id = current_user_id()
+      OR role_of(assigned_agent_id) NOT IN ('subadmin','admin')
+    )
     WHEN 'team_leader' THEN (
       assigned_agent_id = current_user_id()
       OR team_id = current_user_team()
@@ -48,7 +54,11 @@ CREATE POLICY leads_update ON leads FOR UPDATE
 USING (
   CASE current_user_role()
     WHEN 'admin'       THEN true
-    WHEN 'subadmin'    THEN true
+    WHEN 'subadmin'    THEN (
+      assigned_agent_id IS NULL
+      OR assigned_agent_id = current_user_id()
+      OR role_of(assigned_agent_id) NOT IN ('subadmin','admin')
+    )
     WHEN 'team_leader' THEN (
       assigned_agent_id = current_user_id()
       OR team_id = current_user_team()

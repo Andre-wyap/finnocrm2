@@ -146,6 +146,19 @@ $$;
 REVOKE ALL ON FUNCTION get_profile_by_firebase_uid(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION get_profile_by_firebase_uid(text) TO app_user;
 
+-- ─── Helper: role of an arbitrary profile id (bypasses profiles RLS) ─────────
+-- Used by the leads RLS policy to hide leads assigned to another subadmin or an
+-- admin from a subadmin, without reaching through a second RLS layer.
+CREATE OR REPLACE FUNCTION role_of(p_id uuid) RETURNS role
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+  SELECT role FROM profiles WHERE id = p_id
+$$;
+
+REVOKE ALL ON FUNCTION role_of(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION role_of(uuid) TO app_user;
+
 -- ─── Assignment picker: role-aware assignable users ──────────────────────────
 -- Drives the agent picker, single/bulk assign target validation, and the
 -- Reporting users filter (all just SELECT * FROM this). team_leader only

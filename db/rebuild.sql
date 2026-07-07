@@ -140,6 +140,11 @@ CREATE OR REPLACE FUNCTION current_user_team() RETURNS uuid
   SET search_path = public, pg_temp
 AS $$ SELECT team_id FROM profiles WHERE id = current_user_id() $$;
 
+CREATE OR REPLACE FUNCTION role_of(p_id uuid) RETURNS role
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$ SELECT role FROM profiles WHERE id = p_id $$;
+
 CREATE OR REPLACE FUNCTION get_profile_by_firebase_uid(p_uid text)
   RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid)
   LANGUAGE sql STABLE SECURITY DEFINER
@@ -245,7 +250,11 @@ ALTER TABLE team_sources FORCE ROW LEVEL SECURITY;
 CREATE POLICY leads_select ON leads FOR SELECT USING (
   CASE current_user_role()
     WHEN 'admin'       THEN true
-    WHEN 'subadmin'    THEN true
+    WHEN 'subadmin'    THEN (
+      assigned_agent_id IS NULL
+      OR assigned_agent_id = current_user_id()
+      OR role_of(assigned_agent_id) NOT IN ('subadmin','admin')
+    )
     WHEN 'team_leader' THEN (
       assigned_agent_id = current_user_id()
       OR team_id = current_user_team()
@@ -258,7 +267,11 @@ CREATE POLICY leads_update ON leads FOR UPDATE
 USING (
   CASE current_user_role()
     WHEN 'admin'       THEN true
-    WHEN 'subadmin'    THEN true
+    WHEN 'subadmin'    THEN (
+      assigned_agent_id IS NULL
+      OR assigned_agent_id = current_user_id()
+      OR role_of(assigned_agent_id) NOT IN ('subadmin','admin')
+    )
     WHEN 'team_leader' THEN (
       assigned_agent_id = current_user_id()
       OR team_id = current_user_team()

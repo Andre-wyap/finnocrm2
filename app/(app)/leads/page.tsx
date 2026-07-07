@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { AlertTriangle, ClipboardList } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { LeadStatus } from '@/types'
 
 type LeadRow = {
@@ -65,6 +66,9 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true)
   const [offset,  setOffset]  = useState(0)
 
+  // 'all' = every lead the viewer is allowed to see; 'mine' = only leads
+  // assigned to the current user (a cleaner, focused view).
+  const [view,          setView]          = useState<'all' | 'mine'>('all')
   const [statusFilter,  setStatusFilter]  = useState('')
   const [productFilter, setProductFilter] = useState('')
   const [agentFilter,   setAgentFilter]   = useState('')
@@ -102,11 +106,15 @@ export default function LeadsPage() {
 
   const load = useCallback(async (off = 0) => {
     setLoading(true)
+    // In "My Leads" the assignee is forced to the current user, and the agent /
+    // team filters are hidden (they'd be redundant), so ignore them here.
+    const effectiveAgent = view === 'mine' ? (profile?.id ?? '') : agentFilter
+    const effectiveTeam  = view === 'mine' ? '' : teamFilter
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(off) })
-    if (statusFilter)  params.set('status',  statusFilter)
-    if (productFilter) params.set('product', productFilter)
-    if (agentFilter)   params.set('agent',   agentFilter)
-    if (teamFilter)    params.set('team',    teamFilter)
+    if (statusFilter)   params.set('status',  statusFilter)
+    if (productFilter)  params.set('product', productFilter)
+    if (effectiveAgent) params.set('agent',   effectiveAgent)
+    if (effectiveTeam)  params.set('team',    effectiveTeam)
     const res  = await apiFetch(`/api/leads?${params}`)
     const data = await res.json()
     if (res.ok) {
@@ -115,7 +123,7 @@ export default function LeadsPage() {
       setOffset(off)
     }
     setLoading(false)
-  }, [statusFilter, productFilter, agentFilter, teamFilter])
+  }, [view, profile?.id, statusFilter, productFilter, agentFilter, teamFilter])
 
   useEffect(() => {
     if (profile && !canAccessPage) { router.replace('/'); return }
@@ -157,7 +165,8 @@ export default function LeadsPage() {
 
   if (!canAccessPage) return null
 
-  const hasFilters = statusFilter || productFilter || agentFilter || teamFilter
+  const hasFilters =
+    statusFilter || productFilter || (view === 'all' && (agentFilter || teamFilter))
 
   return (
     <div className="space-y-5">
@@ -187,19 +196,21 @@ export default function LeadsPage() {
           >
             {PRODUCT_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
-          <Select
-            value={agentFilter}
-            onChange={(e) => setAgentFilter(e.target.value)}
-            className="h-9 text-xs w-40"
-          >
-            <option value="">All Users</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.full_name}{u.team_name ? ` (${u.team_name})` : ''}
-              </option>
-            ))}
-          </Select>
-          {canFilterByTeam && (
+          {view === 'all' && (
+            <Select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="h-9 text-xs w-40"
+            >
+              <option value="">All Users</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name}{u.team_name ? ` (${u.team_name})` : ''}
+                </option>
+              ))}
+            </Select>
+          )}
+          {view === 'all' && canFilterByTeam && (
             <Select
               value={teamFilter}
               onChange={(e) => setTeamFilter(e.target.value)}
@@ -220,6 +231,27 @@ export default function LeadsPage() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* View tabs — All Leads vs My Leads */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {([
+          { key: 'all',  label: 'All Leads' },
+          { key: 'mine', label: 'My Leads' },
+        ] as const).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => { setView(tab.key); setSelectedIds(new Set()) }}
+            className={cn(
+              '-mb-px px-4 py-2 text-sm font-semibold border-b-2 transition-colors',
+              view === tab.key
+                ? 'border-finno-500 text-finno-500'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Bulk assign bar */}
