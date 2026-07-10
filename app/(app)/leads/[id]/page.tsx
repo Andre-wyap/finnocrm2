@@ -5,14 +5,15 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth/context'
 import { apiFetch } from '@/lib/api/client'
 import { getLeadNav } from '@/lib/lead-nav'
+import { insuranceAge } from '@/lib/age'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
 import {
-  AlertTriangle, MessageCircle, MessageSquare, Phone,
+  AlertTriangle, ArrowLeft, MessageCircle, MessageSquare, Phone,
   ArrowRight, Edit2, UserCheck, Send, Archive, ArchiveRestore,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Star,
 } from 'lucide-react'
 import type { LeadStatus, ActivityType } from '@/types'
 
@@ -35,6 +36,7 @@ type LeadDetail = {
   assigned_at: string | null
   case_size: number | null
   possible_duplicate: boolean
+  highlighted_activity_id: string | null
   created_at: string
   updated_at: string
   agent_name: string | null
@@ -240,14 +242,17 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [markingLost, setMarkingLost] = useState(false)
   const [dismissingDuplicate, setDismissingDuplicate] = useState(false)
   const [navigating, setNavigating] = useState(false)
+  const [highlighting, setHighlighting] = useState(false)
   const remarkRef = useRef<HTMLTextAreaElement>(null)
 
   const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
 
-  // Previous / next navigation walks the ordered lead list the user came from
-  // (stashed in sessionStorage on row click). Empty when the card was opened
-  // directly, in which case the prev/next controls are disabled.
-  const navIds = useMemo(() => getLeadNav(), [])
+  // Previous / next navigation walks the ordered lead list the user came from,
+  // and Back returns to that list — both stashed in sessionStorage on row click.
+  // Empty when the card was opened directly (prev/next disabled; Back falls back
+  // to browser history).
+  const nav = useMemo(() => getLeadNav(), [])
+  const navIds = nav.ids
   const navIndex = navIds.indexOf(id)
   const prevId = navIndex > 0 ? navIds[navIndex - 1] : null
   const nextId = navIndex >= 0 && navIndex < navIds.length - 1 ? navIds[navIndex + 1] : null
@@ -398,14 +403,42 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  // Back to the list the card was opened from (its own tab is restored by the
+  // Leads page). Falls back to browser history if opened directly.
+  function goToList() {
+    if (nav.returnTo) router.push(nav.returnTo)
+    else router.back()
+  }
+
+  function handleBack() {
+    if (navigating) return
+    goToList()
+  }
+
   async function handleSaveAndBack() {
     if (navigating) return
     setNavigating(true)
     setSaveError('')
     try {
-      if (await saveAll()) router.back()
+      if (await saveAll()) goToList()
     } finally {
       setNavigating(false)
+    }
+  }
+
+  // Star a remark so its text shows on the Leads list; star it again to clear.
+  async function handleToggleHighlight(activityId: string) {
+    if (highlighting) return
+    setHighlighting(true)
+    try {
+      const next = lead?.highlighted_activity_id === activityId ? null : activityId
+      const res = await apiFetch(`/api/leads/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ highlighted_activity_id: next }),
+      })
+      if (res.ok) await loadLead()
+    } finally {
+      setHighlighting(false)
     }
   }
 
@@ -481,9 +514,32 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   const leadWhatsappUrl = whatsappUrl(lead.mobile)
+  const dobAge = insuranceAge(draft.date_of_birth)
 
   return (
     <div>
+      {/* Back to the list (top of page). Previous/Next between leads live in the
+          status box on the right. */}
+      <div className="flex items-center gap-2 mb-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleBack}
+          disabled={navigating}
+          className="flex items-center gap-1.5"
+        >
+          <ArrowLeft size={16} /> Back
+        </Button>
+        <Button
+          size="sm"
+          onClick={handleSaveAndBack}
+          loading={navigating}
+          className="flex items-center gap-1.5"
+        >
+          <ArrowLeft size={16} /> Save &amp; Back
+        </Button>
+      </div>
+
       {/* Page header */}
       <div className="flex items-start gap-3 mb-6 flex-wrap">
         <div className="flex-1 min-w-0">
@@ -529,7 +585,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="Date of Birth"
+              label={dobAge !== null ? `Date of Birth · Age ${dobAge}` : 'Date of Birth'}
               type="date"
               value={draft.date_of_birth}
               onChange={(e) => setField('date_of_birth', e.target.value)}
@@ -777,7 +833,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
           </div>
 
           {/* Status box — quick pipeline-stage change. Saved together with any
-              field edits and pending remark by the Back / Next actions below. */}
+              field edits and pending remark by the Previous / Next actions below
+              (and by Save & Back at the top of the page). */}
           <div className="rounded-card border border-border bg-surface-subtle p-4 space-y-3">
             <Select
               label="Status"
@@ -794,7 +851,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               <option value="lost">Lost</option>
             </Select>
 
-            {/* Previous / Next through the list the user came from */}
+            {/* Previous / Next through the list the user came from — both save first */}
             <div className="grid grid-cols-2 gap-2">
               <Button
                 variant="outline"
@@ -815,26 +872,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 Next & Save <ChevronRight size={15} />
               </Button>
             </div>
-
-            {/* Back — with or without saving */}
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                size="sm"
-                onClick={handleSaveAndBack}
-                disabled={navigating}
-                loading={navigating}
-              >
-                Back & Save
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => router.back()}
-                disabled={navigating}
-              >
-                Back Only
-              </Button>
-            </div>
             {(prevId || nextId) && navIndex >= 0 && (
               <p className="text-xs text-text-secondary text-center">
                 {navIndex + 1} of {navIds.length}
@@ -847,22 +884,45 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             <p className="text-sm text-text-secondary text-center py-6">No activity yet.</p>
           ) : (
             <ul className="space-y-4">
-              {activities.map((a) => (
-                <li key={a.id} className="flex gap-3">
-                  <ActivityIcon type={a.type} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-2 mb-0.5">
-                      <span className="text-xs font-semibold text-text-primary truncate">
-                        {a.actor_name ?? '—'}
-                      </span>
-                      <span className="text-xs text-text-secondary shrink-0">
-                        {formatActivityTime(a.created_at)}
-                      </span>
+              {activities.map((a) => {
+                const isHighlighted = a.id === lead.highlighted_activity_id
+                return (
+                  <li
+                    key={a.id}
+                    className={`flex gap-3 ${isHighlighted ? 'rounded-card bg-amber-50 ring-1 ring-amber-200 p-2 -m-2' : ''}`}
+                  >
+                    <ActivityIcon type={a.type} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                        <span className="text-xs font-semibold text-text-primary truncate">
+                          {a.actor_name ?? '—'}
+                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs text-text-secondary">
+                            {formatActivityTime(a.created_at)}
+                          </span>
+                          {a.type === 'remark' && (
+                            <button
+                              onClick={() => handleToggleHighlight(a.id)}
+                              disabled={highlighting}
+                              title={isHighlighted ? 'Remove highlight' : 'Highlight on the leads list'}
+                              aria-label={isHighlighted ? 'Remove highlight' : 'Highlight on the leads list'}
+                              className={`transition-colors disabled:opacity-50 ${
+                                isHighlighted
+                                  ? 'text-amber-500 hover:text-amber-600'
+                                  : 'text-border hover:text-amber-500'
+                              }`}
+                            >
+                              <Star size={14} fill={isHighlighted ? 'currentColor' : 'none'} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <ActivityContent activity={a} />
                     </div>
-                    <ActivityContent activity={a} />
-                  </div>
-                </li>
-              ))}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>

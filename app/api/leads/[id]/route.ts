@@ -85,9 +85,18 @@ export async function PATCH(
     status?: string
     product_interest?: string[]
     possible_duplicate?: boolean
+    highlighted_activity_id?: string | null
   }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  if (
+    body.highlighted_activity_id !== undefined &&
+    body.highlighted_activity_id !== null &&
+    !isUuid(body.highlighted_activity_id)
+  ) {
+    return NextResponse.json({ error: 'Invalid highlighted_activity_id' }, { status: 422 })
   }
 
   if (body.status !== undefined && !VALID_STATUSES.has(body.status)) {
@@ -127,6 +136,9 @@ export async function PATCH(
   if (body.possible_duplicate !== undefined && typeof body.possible_duplicate === 'boolean') {
     updates.possible_duplicate = body.possible_duplicate
   }
+  if (body.highlighted_activity_id !== undefined) {
+    updates.highlighted_activity_id = body.highlighted_activity_id ?? null
+  }
 
   const productInterest = Array.isArray(body.product_interest) ? body.product_interest : null
   const hasScalar = Object.keys(updates).length > 0
@@ -134,6 +146,22 @@ export async function PATCH(
 
   if (!hasScalar && !hasProduct) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+  }
+
+  // A highlight must point at one of this lead's own remarks.
+  if (typeof updates.highlighted_activity_id === 'string') {
+    const owns = await withUser(profile.id, (tx) =>
+      tx<{ id: string }[]>`
+        SELECT id FROM activities
+        WHERE id = ${updates.highlighted_activity_id as string}::uuid
+          AND lead_id = ${id}::uuid
+          AND type = 'remark'
+        LIMIT 1
+      `
+    )
+    if (owns.length === 0) {
+      return NextResponse.json({ error: 'highlighted_activity_id must be a remark on this lead' }, { status: 422 })
+    }
   }
 
   let result: { id: string }[]

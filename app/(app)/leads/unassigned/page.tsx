@@ -253,7 +253,7 @@ export default function UnassignedPage() {
                       )}
                       <button
                         className="font-semibold text-text-primary hover:text-finno-500 transition-colors text-left truncate"
-                        onClick={() => { setLeadNav(leads.map((l) => l.id)); router.push(`/leads/${lead.id}`) }}
+                        onClick={() => { setLeadNav({ ids: leads.map((l) => l.id), returnTo: '/leads/unassigned' }); router.push(`/leads/${lead.id}`) }}
                       >
                         {lead.full_name}
                       </button>

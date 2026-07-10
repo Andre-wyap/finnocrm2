@@ -82,6 +82,7 @@ CREATE TABLE leads (
   possible_duplicate boolean NOT NULL DEFAULT false,
   archived_at        timestamptz,                    -- soft-archive (admin); NULL = active
   archived_by        uuid REFERENCES profiles(id) ON DELETE SET NULL,
+  highlighted_activity_id uuid,               -- FK added after activities table (below)
   raw_payload        jsonb,
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
@@ -98,6 +99,10 @@ CREATE TABLE activities (
   new_value    text,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE leads
+  ADD CONSTRAINT leads_highlighted_activity_id_fkey
+  FOREIGN KEY (highlighted_activity_id) REFERENCES activities(id) ON DELETE SET NULL;
 
 -- ─── 3. Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX idx_leads_assigned_agent  ON leads(assigned_agent_id);

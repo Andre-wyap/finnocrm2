@@ -7,8 +7,9 @@ import { apiFetch } from '@/lib/api/client'
 import { StatusBadge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { DashboardWidgets } from '@/components/dashboard/DashboardWidgets'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Star } from 'lucide-react'
 import { setLeadNav } from '@/lib/lead-nav'
+import { insuranceAge } from '@/lib/age'
 import type { LeadStatus } from '@/types'
 
 type LeadRow = {
@@ -17,8 +18,19 @@ type LeadRow = {
   status: LeadStatus
   mobile: string
   possible_duplicate: boolean
+  date_of_birth: string | null
   agent_id: string | null
   agent_name: string | null
+  highlighted_remark: string | null
+}
+
+function formatDob(dob: string): string {
+  return new Date(dob).toLocaleDateString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 const STATUS_OPTS = [
@@ -105,19 +117,33 @@ function AgentLeadsList() {
                 <li key={lead.id}>
                   <button
                     className="w-full text-left px-5 py-4 hover:bg-surface-subtle transition-colors"
-                    onClick={() => { setLeadNav(leads.map((l) => l.id)); router.push(`/leads/${lead.id}`) }}
+                    onClick={() => { setLeadNav({ ids: leads.map((l) => l.id), returnTo: '/' }); router.push(`/leads/${lead.id}`) }}
                   >
                     <div className="sm:grid sm:grid-cols-[2fr_auto] sm:gap-4 sm:items-center">
-                      <div className="flex items-center gap-2 min-w-0">
-                        {lead.possible_duplicate && (
-                          <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {lead.possible_duplicate && (
+                            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                          )}
+                          <span className="font-semibold text-text-primary truncate">{lead.full_name}</span>
+                        </div>
+                        {lead.date_of_birth && (
+                          <p className="text-xs text-text-secondary mt-0.5">
+                            {formatDob(lead.date_of_birth)}
+                            {insuranceAge(lead.date_of_birth) !== null && ` · Age ${insuranceAge(lead.date_of_birth)}`}
+                          </p>
                         )}
-                        <span className="font-semibold text-text-primary truncate">{lead.full_name}</span>
                       </div>
                       <div className="mt-2 sm:mt-0">
                         <StatusBadge status={lead.status} />
                       </div>
                     </div>
+                    {lead.highlighted_remark && (
+                      <p className="flex items-start gap-1.5 mt-2 text-xs text-amber-700 bg-amber-50 rounded-button px-2 py-1">
+                        <Star size={12} fill="currentColor" className="shrink-0 mt-0.5 text-amber-500" />
+                        <span className="min-w-0">{lead.highlighted_remark}</span>
+                      </p>
+                    )}
                   </button>
                 </li>
               ))}

@@ -46,19 +46,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       product_interest: string[]
       mobile: string
       source: string
+      date_of_birth: string | null
       possible_duplicate: boolean
       case_size: number | null
       created_at: string
       agent_id: string | null
       agent_name: string | null
+      highlighted_remark: string | null
     }[]>`
       SELECT l.id, l.full_name, l.status, l.product_interest,
-             l.mobile, l.source,
+             l.mobile, l.source, l.date_of_birth,
              l.possible_duplicate, l.case_size, l.created_at,
              p.id   AS agent_id,
-             p.full_name AS agent_name
+             p.full_name AS agent_name,
+             ha.content AS highlighted_remark
       FROM leads l
       LEFT JOIN profiles p ON p.id = l.assigned_agent_id
+      LEFT JOIN activities ha ON ha.id = l.highlighted_activity_id
       WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond}
       ORDER BY l.created_at DESC
       LIMIT ${limit} OFFSET ${offset}

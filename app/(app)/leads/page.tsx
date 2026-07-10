@@ -7,9 +7,10 @@ import { apiFetch } from '@/lib/api/client'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { AlertTriangle, ClipboardList } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { setLeadNav } from '@/lib/lead-nav'
+import { insuranceAge } from '@/lib/age'
 import type { LeadStatus } from '@/types'
 
 type LeadRow = {
@@ -17,8 +18,21 @@ type LeadRow = {
   full_name: string
   status: LeadStatus
   possible_duplicate: boolean
+  date_of_birth: string | null
   agent_id: string | null
   agent_name: string | null
+  highlighted_remark: string | null
+}
+
+const VIEW_KEY = 'finno:leadsView'
+
+function formatDob(dob: string): string {
+  return new Date(dob).toLocaleDateString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 type AssignableUser = {
@@ -70,6 +84,7 @@ export default function LeadsPage() {
 
   // 'all' = every lead the viewer is allowed to see; 'mine' = only leads
   // assigned to the current user (a cleaner, focused view).
+  // Persisted so returning from a lead card (Back) lands on the same tab.
   const [view,          setView]          = useState<'all' | 'mine'>('all')
   const [statusFilter,  setStatusFilter]  = useState('')
   const [productFilter, setProductFilter] = useState('')
@@ -92,6 +107,18 @@ export default function LeadsPage() {
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected
   }, [someSelected])
+
+  // Restore the last-used tab on mount (e.g. after Back from a lead card).
+  useEffect(() => {
+    const saved = sessionStorage.getItem(VIEW_KEY)
+    if (saved === 'mine' || saved === 'all') setView(saved)
+  }, [])
+
+  function selectView(next: 'all' | 'mine') {
+    setView(next)
+    setSelectedIds(new Set())
+    try { sessionStorage.setItem(VIEW_KEY, next) } catch { /* ignore */ }
+  }
 
   function toggleRow(id: string) {
     setSelectedIds((prev) => {
@@ -243,7 +270,7 @@ export default function LeadsPage() {
         ] as const).map((tab) => (
           <button
             key={tab.key}
-            onClick={() => { setView(tab.key); setSelectedIds(new Set()) }}
+            onClick={() => selectView(tab.key)}
             className={cn(
               '-mb-px px-4 py-2 text-sm font-semibold border-b-2 transition-colors',
               view === tab.key
@@ -332,14 +359,22 @@ export default function LeadsPage() {
                   </div>
                   <button
                     className="flex-1 min-w-0 text-left px-2 py-4 hover:bg-surface-subtle transition-colors"
-                    onClick={() => { setLeadNav(leads.map((l) => l.id)); router.push(`/leads/${lead.id}`) }}
+                    onClick={() => { setLeadNav({ ids: leads.map((l) => l.id), returnTo: '/leads' }); router.push(`/leads/${lead.id}`) }}
                   >
                     <div className="sm:grid sm:grid-cols-[2fr_auto_1fr] sm:gap-4 sm:items-center">
-                      <div className="flex items-center gap-2 min-w-0">
-                        {lead.possible_duplicate && (
-                          <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {lead.possible_duplicate && (
+                            <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                          )}
+                          <span className="font-semibold text-text-primary truncate">{lead.full_name}</span>
+                        </div>
+                        {lead.date_of_birth && (
+                          <p className="text-xs text-text-secondary mt-0.5">
+                            {formatDob(lead.date_of_birth)}
+                            {insuranceAge(lead.date_of_birth) !== null && ` · Age ${insuranceAge(lead.date_of_birth)}`}
+                          </p>
                         )}
-                        <span className="font-semibold text-text-primary truncate">{lead.full_name}</span>
                       </div>
                       <div className="mt-2 sm:mt-0">
                         <StatusBadge status={lead.status} />
@@ -348,6 +383,12 @@ export default function LeadsPage() {
                         {lead.agent_name ?? <span className="italic text-border">unassigned</span>}
                       </div>
                     </div>
+                    {lead.highlighted_remark && (
+                      <p className="flex items-start gap-1.5 mt-2 text-xs text-amber-700 bg-amber-50 rounded-button px-2 py-1">
+                        <Star size={12} fill="currentColor" className="shrink-0 mt-0.5 text-amber-500" />
+                        <span className="min-w-0">{lead.highlighted_remark}</span>
+                      </p>
+                    )}
                   </button>
                 </li>
               ))}
