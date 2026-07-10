@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { AlertTriangle, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { setLeadNav } from '@/lib/lead-nav'
 import type { LeadStatus } from '@/types'
 
 type LeadRow = {
@@ -34,6 +35,7 @@ type TeamOption = {
 const STATUS_OPTS = [
   { value: '',           label: 'All Statuses' },
   { value: 'lead',       label: 'Lead' },
+  { value: 'approach',   label: 'Approach' },
   { value: 'follow_up',  label: 'Follow-up' },
   { value: 'potential',  label: 'Potential' },
   { value: 'closed',     label: 'Closed' },
@@ -330,7 +332,7 @@ export default function LeadsPage() {
                   </div>
                   <button
                     className="flex-1 min-w-0 text-left px-2 py-4 hover:bg-surface-subtle transition-colors"
-                    onClick={() => router.push(`/leads/${lead.id}`)}
+                    onClick={() => { setLeadNav(leads.map((l) => l.id)); router.push(`/leads/${lead.id}`) }}
                   >
                     <div className="sm:grid sm:grid-cols-[2fr_auto_1fr] sm:gap-4 sm:items-center">
                       <div className="flex items-center gap-2 min-w-0">

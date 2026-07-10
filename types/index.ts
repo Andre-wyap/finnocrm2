@@ -1,7 +1,7 @@
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 export type Role = 'agent' | 'team_leader' | 'subadmin' | 'admin'
-export type LeadStatus = 'unassigned' | 'lead' | 'follow_up' | 'potential' | 'closed' | 'issued' | 'lost'
+export type LeadStatus = 'unassigned' | 'lead' | 'approach' | 'follow_up' | 'potential' | 'closed' | 'issued' | 'lost'
 export type Gender = 'male' | 'female'
 export type SmokingStatus = 'smoker' | 'non_smoker'
 export type Product = 'medical' | 'critical_illness' | 'life' | 'personal_accident'

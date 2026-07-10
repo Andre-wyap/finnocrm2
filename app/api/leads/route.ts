@@ -3,7 +3,7 @@ import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import { isUuid } from '@/lib/validation'
 
-const VALID_STATUSES = new Set(['unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
+const VALID_STATUSES = new Set(['unassigned', 'lead', 'approach', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
 const VALID_PRODUCTS = new Set(['medical', 'critical_illness', 'life', 'personal_accident'])
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

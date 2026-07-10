@@ -9,6 +9,7 @@ import type { Role } from '@/types'
 
 type PipelineCounts = {
   lead:      number
+  approach:  number
   follow_up: number
   potential: number
   closed:    number
@@ -83,6 +84,7 @@ function StatCard({
 function PipelineCard({ data, loading }: { data: DashboardData | null; loading: boolean }) {
   const stages = [
     { key: 'lead'      as const, label: 'Lead',      bg: 'bg-blue-100 text-blue-700' },
+    { key: 'approach'  as const, label: 'Approach',  bg: 'bg-sky-100 text-sky-700' },
     { key: 'follow_up' as const, label: 'Follow-up', bg: 'bg-amber-100 text-amber-700' },
     { key: 'potential' as const, label: 'Potential', bg: 'bg-violet-100 text-violet-700' },
     { key: 'closed'    as const, label: 'Closed',    bg: 'bg-teal-100 text-teal-700' },

@@ -5,7 +5,7 @@ import sql from '@/lib/db/client'
 import { isUuid } from '@/lib/validation'
 import type { LeadStatus } from '@/types'
 
-const VALID_STATUSES = new Set<string>(['unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
+const VALID_STATUSES = new Set<string>(['unassigned', 'lead', 'approach', 'follow_up', 'potential', 'closed', 'issued', 'lost'])
 const VALID_GENDERS = new Set<string | null>(['male', 'female', null])
 const VALID_SMOKING = new Set<string | null>(['smoker', 'non_smoker', null])
 const VALID_PRODUCTS = new Set<string>(['medical', 'critical_illness', 'life', 'personal_accident'])

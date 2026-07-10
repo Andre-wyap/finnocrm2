@@ -25,7 +25,7 @@ DROP TYPE IF EXISTS role           CASCADE;
 
 -- ─── 1. Enums ─────────────────────────────────────────────────────────────────
 CREATE TYPE role           AS ENUM ('agent', 'team_leader', 'subadmin', 'admin');
-CREATE TYPE lead_status    AS ENUM ('unassigned', 'lead', 'follow_up', 'potential', 'closed', 'issued', 'lost');
+CREATE TYPE lead_status    AS ENUM ('unassigned', 'lead', 'approach', 'follow_up', 'potential', 'closed', 'issued', 'lost');
 CREATE TYPE gender         AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product        AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');

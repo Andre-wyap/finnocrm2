@@ -8,6 +8,7 @@ import { ProductTag } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { AlertTriangle, UserCheck } from 'lucide-react'
+import { setLeadNav } from '@/lib/lead-nav'
 
 type LeadRow = {
   id: string
@@ -252,7 +253,7 @@ export default function UnassignedPage() {
                       )}
                       <button
                         className="font-semibold text-text-primary hover:text-finno-500 transition-colors text-left truncate"
-                        onClick={() => router.push(`/leads/${lead.id}`)}
+                        onClick={() => { setLeadNav(leads.map((l) => l.id)); router.push(`/leads/${lead.id}`) }}
                       >
                         {lead.full_name}
                       </button>

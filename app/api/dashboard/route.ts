@@ -30,6 +30,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Pipeline counts + per-stage case sizes in one pass
     const [row] = await tx<{
       lead_count:       number
+      approach_count:   number
       follow_up_count:  number
       potential_count:  number
       closed_count:     number
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }[]>`
       SELECT
         COUNT(*) FILTER (WHERE status = 'lead')::int          AS lead_count,
+        COUNT(*) FILTER (WHERE status = 'approach')::int      AS approach_count,
         COUNT(*) FILTER (WHERE status = 'follow_up')::int     AS follow_up_count,
         COUNT(*) FILTER (WHERE status = 'potential')::int     AS potential_count,
         COUNT(*) FILTER (WHERE status = 'closed')::int        AS closed_count,
@@ -62,6 +64,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       unassigned_today,
       pipeline: {
         lead:      row.lead_count,
+        approach:  row.approach_count,
         follow_up: row.follow_up_count,
         potential: row.potential_count,
         closed:    row.closed_count,

@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { DashboardWidgets } from '@/components/dashboard/DashboardWidgets'
 import { AlertTriangle } from 'lucide-react'
+import { setLeadNav } from '@/lib/lead-nav'
 import type { LeadStatus } from '@/types'
 
 type LeadRow = {
@@ -23,6 +24,7 @@ type LeadRow = {
 const STATUS_OPTS = [
   { value: '',           label: 'All Statuses' },
   { value: 'lead',       label: 'Lead' },
+  { value: 'approach',   label: 'Approach' },
   { value: 'follow_up',  label: 'Follow-up' },
   { value: 'potential',  label: 'Potential' },
   { value: 'closed',     label: 'Closed' },
@@ -103,7 +105,7 @@ function AgentLeadsList() {
                 <li key={lead.id}>
                   <button
                     className="w-full text-left px-5 py-4 hover:bg-surface-subtle transition-colors"
-                    onClick={() => router.push(`/leads/${lead.id}`)}
+                    onClick={() => { setLeadNav(leads.map((l) => l.id)); router.push(`/leads/${lead.id}`) }}
                   >
                     <div className="sm:grid sm:grid-cols-[2fr_auto] sm:gap-4 sm:items-center">
                       <div className="flex items-center gap-2 min-w-0">

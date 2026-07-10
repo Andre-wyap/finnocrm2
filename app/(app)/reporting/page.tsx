@@ -52,6 +52,7 @@ function AgentTable({ agents, loading }: { agents: ReportingData['agents']; load
             <th className="py-2.5 pr-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">Team</th>
             <th className="py-2.5 pr-2 text-xs font-semibold uppercase tracking-wide text-text-secondary text-right">Active</th>
             <th className="py-2.5 pr-2 text-xs font-semibold uppercase tracking-wide text-blue-600 text-right">Lead</th>
+            <th className="py-2.5 pr-2 text-xs font-semibold uppercase tracking-wide text-sky-600 text-right">Approach</th>
             <th className="py-2.5 pr-2 text-xs font-semibold uppercase tracking-wide text-amber-600 text-right">Follow-up</th>
             <th className="py-2.5 pr-2 text-xs font-semibold uppercase tracking-wide text-violet-600 text-right">Potential</th>
             <th className="py-2.5 pr-2 text-xs font-semibold uppercase tracking-wide text-teal-600 text-right">Closed</th>
@@ -66,6 +67,7 @@ function AgentTable({ agents, loading }: { agents: ReportingData['agents']; load
               <td className="py-2.5 pr-4 text-text-secondary text-xs">{a.team_name ?? <span className="italic">—</span>}</td>
               <td className="py-2.5 pr-2 text-text-secondary text-right font-semibold">{a.total_count}</td>
               <td className="py-2.5 pr-2 text-blue-600 text-right">{a.lead_count}</td>
+              <td className="py-2.5 pr-2 text-sky-600 text-right">{a.approach_count}</td>
               <td className="py-2.5 pr-2 text-amber-600 text-right">{a.follow_up_count}</td>
               <td className="py-2.5 pr-2 text-violet-600 text-right">{a.potential_count}</td>
               <td className="py-2.5 pr-2 text-teal-600 text-right">{a.closed_count}</td>

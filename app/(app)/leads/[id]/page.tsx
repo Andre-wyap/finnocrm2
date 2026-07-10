@@ -1,16 +1,18 @@
 'use client'
 
-import { use, useCallback, useEffect, useRef, useState } from 'react'
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth/context'
 import { apiFetch } from '@/lib/api/client'
+import { getLeadNav } from '@/lib/lead-nav'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { StatusBadge } from '@/components/ui/badge'
 import {
-  AlertTriangle, ArrowLeft, MessageCircle, MessageSquare, Phone,
+  AlertTriangle, MessageCircle, MessageSquare, Phone,
   ArrowRight, Edit2, UserCheck, Send, Archive, ArchiveRestore,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import type { LeadStatus, ActivityType } from '@/types'
 
@@ -237,9 +239,18 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [lostConfirm, setLostConfirm] = useState(false)
   const [markingLost, setMarkingLost] = useState(false)
   const [dismissingDuplicate, setDismissingDuplicate] = useState(false)
+  const [navigating, setNavigating] = useState(false)
   const remarkRef = useRef<HTMLTextAreaElement>(null)
 
   const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
+
+  // Previous / next navigation walks the ordered lead list the user came from
+  // (stashed in sessionStorage on row click). Empty when the card was opened
+  // directly, in which case the prev/next controls are disabled.
+  const navIds = useMemo(() => getLeadNav(), [])
+  const navIndex = navIds.indexOf(id)
+  const prevId = navIndex > 0 ? navIds[navIndex - 1] : null
+  const nextId = navIndex >= 0 && navIndex < navIds.length - 1 ? navIds[navIndex + 1] : null
 
   const loadActivities = useCallback(async () => {
     const res = await apiFetch(`/api/leads/${id}/activities`)
@@ -260,6 +271,17 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     loadLead()
     loadActivities()
   }, [loadLead, loadActivities])
+
+  // Reset the transient edit/remark state whenever we move to a different lead
+  // (prev/next navigation reuses this same page component without remounting).
+  useEffect(() => {
+    setDirty(false)
+    setSaveError('')
+    setQuickRemark('')
+    setRemarkText('')
+    setSelectedAgentId('')
+    setLostConfirm(false)
+  }, [id])
 
   useEffect(() => {
     if (!isAdminOrSubadmin) return
@@ -290,31 +312,49 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     if (lead) { setDraft(leadToDraft(lead)); setDirty(false); setSaveError('') }
   }
 
+  // Persist the customer-info + status draft. Returns true on success; sets
+  // saveError and returns false on a validation or request failure. Does not
+  // reload — callers decide whether to refetch or navigate away.
+  async function persistDraft(): Promise<boolean> {
+    if (!draft) return true
+    if (!draft.full_name.trim()) { setSaveError('Full name is required'); return false }
+    if (!draft.mobile.trim()) { setSaveError('Mobile is required'); return false }
+    const body: Record<string, unknown> = {
+      full_name: draft.full_name,
+      date_of_birth: draft.date_of_birth || null,
+      gender: draft.gender || null,
+      smoking_status: draft.smoking_status || null,
+      mobile: draft.mobile,
+      email: draft.email || null,
+      state: draft.state || null,
+      case_size: draft.case_size ? parseFloat(draft.case_size) : null,
+      status: draft.status,
+      product_interest: draft.product_interest,
+    }
+    const res = await apiFetch(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+    if (!res.ok) {
+      const data = await res.json()
+      setSaveError(data.error ?? 'Failed to save')
+      return false
+    }
+    return true
+  }
+
+  // Post the pending remark (quick + free text), if any. No-op when empty.
+  async function persistRemark(): Promise<void> {
+    const remarkContent = [quickRemark.trim(), remarkText.trim()].filter(Boolean).join(': ')
+    if (!remarkContent) return
+    await apiFetch(`/api/leads/${id}/activities`, {
+      method: 'POST',
+      body: JSON.stringify({ content: remarkContent }),
+    })
+  }
+
   async function handleSave() {
-    if (!draft) return
-    if (!draft.full_name.trim()) { setSaveError('Full name is required'); return }
-    if (!draft.mobile.trim()) { setSaveError('Mobile is required'); return }
     setSaving(true)
     setSaveError('')
     try {
-      const body: Record<string, unknown> = {
-        full_name: draft.full_name,
-        date_of_birth: draft.date_of_birth || null,
-        gender: draft.gender || null,
-        smoking_status: draft.smoking_status || null,
-        mobile: draft.mobile,
-        email: draft.email || null,
-        state: draft.state || null,
-        case_size: draft.case_size ? parseFloat(draft.case_size) : null,
-        status: draft.status,
-        product_interest: draft.product_interest,
-      }
-      const res = await apiFetch(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
-      if (!res.ok) {
-        const data = await res.json()
-        setSaveError(data.error ?? 'Failed to save')
-        return
-      }
+      if (!(await persistDraft())) return
       setDirty(false)
       await loadLead()
       await loadActivities()
@@ -324,24 +364,48 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   async function handleAddRemark() {
-    const content = remarkText.trim()
-    const quick = quickRemark.trim()
-    const remarkContent = [quick, content].filter(Boolean).join(': ')
-    if (!remarkContent) return
     setRemarkSubmitting(true)
     try {
-      const res = await apiFetch(`/api/leads/${id}/activities`, {
-        method: 'POST',
-        body: JSON.stringify({ content: remarkContent }),
-      })
-      if (res.ok) {
-        setQuickRemark('')
-        setRemarkText('')
-        await loadActivities()
-        remarkRef.current?.focus()
-      }
+      await persistRemark()
+      setQuickRemark('')
+      setRemarkText('')
+      await loadActivities()
+      remarkRef.current?.focus()
     } finally {
       setRemarkSubmitting(false)
+    }
+  }
+
+  // Save any pending field/status edits and remark in one shot, used by the
+  // Back / Previous / Next actions so nothing is silently lost on leaving.
+  async function saveAll(): Promise<boolean> {
+    if (dirty) {
+      if (!(await persistDraft())) return false
+      setDirty(false)
+    }
+    await persistRemark()
+    return true
+  }
+
+  async function handleSaveAndGo(targetId: string | null) {
+    if (!targetId || navigating) return
+    setNavigating(true)
+    setSaveError('')
+    try {
+      if (await saveAll()) router.push(`/leads/${targetId}`)
+    } finally {
+      setNavigating(false)
+    }
+  }
+
+  async function handleSaveAndBack() {
+    if (navigating) return
+    setNavigating(true)
+    setSaveError('')
+    try {
+      if (await saveAll()) router.back()
+    } finally {
+      setNavigating(false)
     }
   }
 
@@ -422,12 +486,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     <div>
       {/* Page header */}
       <div className="flex items-start gap-3 mb-6 flex-wrap">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors mt-0.5 shrink-0"
-        >
-          <ArrowLeft size={16} /> Back
-        </button>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold text-text-primary">{lead.full_name}</h1>
@@ -577,20 +635,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
 
-          <Select
-            label="Status"
-            value={draft.status}
-            onChange={(e) => setField('status', e.target.value as LeadStatus)}
-          >
-            <option value="unassigned">Unassigned</option>
-            <option value="lead">Lead</option>
-            <option value="follow_up">Follow-up</option>
-            <option value="potential">Potential</option>
-            <option value="closed">Closed</option>
-            <option value="issued">Issued</option>
-            <option value="lost">Lost</option>
-          </Select>
-
           {/* Read-only fields */}
           <div className="pt-2 border-t border-border space-y-2">
             <div className="flex justify-between text-sm">
@@ -730,6 +774,72 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
             >
               <Send size={13} /> Add Remark
             </Button>
+          </div>
+
+          {/* Status box — quick pipeline-stage change. Saved together with any
+              field edits and pending remark by the Back / Next actions below. */}
+          <div className="rounded-card border border-border bg-surface-subtle p-4 space-y-3">
+            <Select
+              label="Status"
+              value={draft.status}
+              onChange={(e) => setField('status', e.target.value as LeadStatus)}
+            >
+              <option value="unassigned">Unassigned</option>
+              <option value="lead">Lead</option>
+              <option value="approach">Approach</option>
+              <option value="follow_up">Follow-up</option>
+              <option value="potential">Potential</option>
+              <option value="closed">Closed</option>
+              <option value="issued">Issued</option>
+              <option value="lost">Lost</option>
+            </Select>
+
+            {/* Previous / Next through the list the user came from */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleSaveAndGo(prevId)}
+                disabled={!prevId || navigating}
+                className="flex items-center justify-center gap-1"
+              >
+                <ChevronLeft size={15} /> Previous
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handleSaveAndGo(nextId)}
+                disabled={!nextId || navigating}
+                loading={navigating}
+                className="flex items-center justify-center gap-1"
+              >
+                Next & Save <ChevronRight size={15} />
+              </Button>
+            </div>
+
+            {/* Back — with or without saving */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                size="sm"
+                onClick={handleSaveAndBack}
+                disabled={navigating}
+                loading={navigating}
+              >
+                Back & Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.back()}
+                disabled={navigating}
+              >
+                Back Only
+              </Button>
+            </div>
+            {(prevId || nextId) && navIndex >= 0 && (
+              <p className="text-xs text-text-secondary text-center">
+                {navIndex + 1} of {navIds.length}
+              </p>
+            )}
           </div>
 
           {/* Feed */}

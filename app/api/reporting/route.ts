@@ -9,6 +9,7 @@ type AgentRow = {
   team_name: string | null
   total_count: number
   lead_count: number
+  approach_count: number
   follow_up_count: number
   potential_count: number
   closed_count: number
