@@ -9,12 +9,14 @@
 BEGIN;
 
 -- ─── 0. Teardown (drop wrong tables + enums) ──────────────────────────────────
+DROP TABLE IF EXISTS wa_instances CASCADE;
 DROP TABLE IF EXISTS activities   CASCADE;
 DROP TABLE IF EXISTS leads        CASCADE;
 DROP TABLE IF EXISTS team_sources CASCADE;
 DROP TABLE IF EXISTS profiles     CASCADE;
 DROP TABLE IF EXISTS teams        CASCADE;
 
+DROP TYPE IF EXISTS wa_instance_status CASCADE;
 DROP TYPE IF EXISTS activity_type  CASCADE;
 DROP TYPE IF EXISTS product        CASCADE;
 DROP TYPE IF EXISTS smoking_status CASCADE;
@@ -30,6 +32,7 @@ CREATE TYPE gender         AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product        AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');
 CREATE TYPE activity_type  AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore');
+CREATE TYPE wa_instance_status AS ENUM ('disconnected', 'connecting', 'connected');
 
 -- ─── 2. Tables ────────────────────────────────────────────────────────────────
 CREATE TABLE teams (
@@ -48,6 +51,7 @@ CREATE TABLE profiles (
   role         role NOT NULL,
   team_id      uuid REFERENCES teams(id) ON DELETE SET NULL,
   is_active    boolean NOT NULL DEFAULT true,
+  wa_enabled   boolean NOT NULL DEFAULT false,   -- WhatsApp automation gate (admin-managed)
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -104,6 +108,17 @@ ALTER TABLE leads
   ADD CONSTRAINT leads_highlighted_activity_id_fkey
   FOREIGN KEY (highlighted_activity_id) REFERENCES activities(id) ON DELETE SET NULL;
 
+CREATE TABLE wa_instances (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id    uuid NOT NULL UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
+  instance_name text NOT NULL UNIQUE,
+  status        wa_instance_status NOT NULL DEFAULT 'disconnected',
+  phone_number  text,
+  connected_at  timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
 -- ─── 3. Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX idx_leads_assigned_agent  ON leads(assigned_agent_id);
 CREATE INDEX idx_leads_status          ON leads(status);
@@ -121,6 +136,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON profiles     TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON leads        TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON wa_instances TO app_user;
 GRANT SELECT, INSERT ON leads TO intake_role;
 GRANT SELECT ON team_sources TO intake_role;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -151,11 +167,11 @@ CREATE OR REPLACE FUNCTION role_of(p_id uuid) RETURNS role
 AS $$ SELECT role FROM profiles WHERE id = p_id $$;
 
 CREATE OR REPLACE FUNCTION get_profile_by_firebase_uid(p_uid text)
-  RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid)
+  RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid, wa_enabled boolean)
   LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path = public, pg_temp
 AS $$
-  SELECT id, full_name, email, role, team_id
+  SELECT id, full_name, email, role, team_id, wa_enabled
   FROM profiles
   WHERE firebase_uid = p_uid AND is_active = true
   LIMIT 1;
@@ -171,6 +187,10 @@ AS $$ BEGIN NEW.updated_at = now(); RETURN NEW; END; $$;
 
 CREATE TRIGGER leads_updated_at
   BEFORE UPDATE ON leads
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER wa_instances_updated_at
+  BEFORE UPDATE ON wa_instances
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE OR REPLACE FUNCTION log_lead_changes()
@@ -245,12 +265,14 @@ ALTER TABLE profiles     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_instances ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE leads        FORCE ROW LEVEL SECURITY;
 ALTER TABLE profiles     FORCE ROW LEVEL SECURITY;
 ALTER TABLE activities   FORCE ROW LEVEL SECURITY;
 ALTER TABLE teams        FORCE ROW LEVEL SECURITY;
 ALTER TABLE team_sources FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_instances FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY leads_select ON leads FOR SELECT USING (
   CASE current_user_role()
@@ -321,6 +343,7 @@ CREATE POLICY profiles_update ON profiles FOR UPDATE
       id = current_user_id()
       AND role = (SELECT role FROM profiles WHERE id = current_user_id())
       AND (team_id IS NOT DISTINCT FROM (SELECT team_id FROM profiles WHERE id = current_user_id()))
+      AND wa_enabled = (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
     )
   );
 CREATE POLICY profiles_insert ON profiles FOR INSERT WITH CHECK (current_user_role() = 'admin');
@@ -356,6 +379,23 @@ CREATE POLICY team_sources_select ON team_sources FOR SELECT USING (
 CREATE POLICY team_sources_insert ON team_sources FOR INSERT WITH CHECK (current_user_role() = 'admin');
 CREATE POLICY team_sources_update ON team_sources FOR UPDATE USING (current_user_role() = 'admin');
 CREATE POLICY team_sources_delete ON team_sources FOR DELETE USING (current_user_role() = 'admin');
+
+CREATE POLICY wa_instances_select ON wa_instances FOR SELECT USING (
+  profile_id = current_user_id() OR current_user_role() = 'admin'
+);
+CREATE POLICY wa_instances_insert ON wa_instances FOR INSERT WITH CHECK (
+  current_user_role() = 'admin'
+  OR (
+    profile_id = current_user_id()
+    AND (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+  )
+);
+CREATE POLICY wa_instances_update ON wa_instances FOR UPDATE
+  USING (profile_id = current_user_id() OR current_user_role() = 'admin')
+  WITH CHECK (profile_id = current_user_id() OR current_user_role() = 'admin');
+CREATE POLICY wa_instances_delete ON wa_instances FOR DELETE USING (
+  profile_id = current_user_id() OR current_user_role() = 'admin'
+);
 
 -- ─── 8. Re-insert bootstrap admin ─────────────────────────────────────────────
 INSERT INTO profiles (firebase_uid, full_name, email, role, is_active)

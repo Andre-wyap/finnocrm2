@@ -44,6 +44,10 @@ CREATE TRIGGER leads_updated_at
   BEFORE UPDATE ON leads
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER wa_instances_updated_at
+  BEFORE UPDATE ON wa_instances
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- ─── Trigger: audit log for lead field / status changes ───────────────────────
 -- Writes field_change or status_change to activities on every UPDATE.
 -- Excludes assignment fields (assigned_agent_id, assigned_by, assigned_at)
@@ -132,11 +136,11 @@ CREATE TRIGGER leads_audit
 -- firebase_uid extracted from a verified Firebase JWT, so there is no
 -- enumeration risk.
 CREATE OR REPLACE FUNCTION get_profile_by_firebase_uid(p_uid text)
-  RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid)
+  RETURNS TABLE (id uuid, full_name text, email text, role role, team_id uuid, wa_enabled boolean)
   LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path = public, pg_temp
 AS $$
-  SELECT id, full_name, email, role, team_id
+  SELECT id, full_name, email, role, team_id, wa_enabled
   FROM profiles
   WHERE firebase_uid = p_uid
     AND is_active = true

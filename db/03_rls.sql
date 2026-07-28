@@ -8,6 +8,7 @@ ALTER TABLE profiles     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_instances ENABLE ROW LEVEL SECURITY;
 
 -- Force RLS even for the table owner (keeps testing honest)
 ALTER TABLE leads        FORCE ROW LEVEL SECURITY;
@@ -15,6 +16,7 @@ ALTER TABLE profiles     FORCE ROW LEVEL SECURITY;
 ALTER TABLE activities   FORCE ROW LEVEL SECURITY;
 ALTER TABLE teams        FORCE ROW LEVEL SECURITY;
 ALTER TABLE team_sources FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_instances FORCE ROW LEVEL SECURITY;
 
 -- ─── leads ────────────────────────────────────────────────────────────────────
 
@@ -113,16 +115,17 @@ CREATE POLICY profiles_select ON profiles FOR SELECT USING (
 );
 
 -- UPDATE: anyone can update their own non-privileged fields;
--- role and team_id are admin-only (enforced below via WITH CHECK)
+-- role, team_id, and wa_enabled are admin-only (enforced below via WITH CHECK)
 CREATE POLICY profiles_update ON profiles FOR UPDATE USING (
   id = current_user_id() OR current_user_role() = 'admin'
 ) WITH CHECK (
   current_user_role() = 'admin'
   OR (
-    -- Self-update: only own row, and role/team_id must not change
+    -- Self-update: only own row, and role/team_id/wa_enabled must not change
     id = current_user_id()
     AND role = (SELECT role FROM profiles WHERE id = current_user_id())
     AND (team_id IS NOT DISTINCT FROM (SELECT team_id FROM profiles WHERE id = current_user_id()))
+    AND wa_enabled = (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
   )
 );
 
@@ -199,4 +202,29 @@ CREATE POLICY team_sources_update ON team_sources FOR UPDATE USING (
 
 CREATE POLICY team_sources_delete ON team_sources FOR DELETE USING (
   current_user_role() = 'admin'
+);
+
+-- ─── wa_instances ─────────────────────────────────────────────────────────────
+
+-- A user manages only their own WhatsApp instance; admin sees and manages all.
+-- INSERT additionally requires the user's wa_enabled gate to be on — the
+-- profiles self-row is always visible, so the subquery works for any role.
+CREATE POLICY wa_instances_select ON wa_instances FOR SELECT USING (
+  profile_id = current_user_id() OR current_user_role() = 'admin'
+);
+
+CREATE POLICY wa_instances_insert ON wa_instances FOR INSERT WITH CHECK (
+  current_user_role() = 'admin'
+  OR (
+    profile_id = current_user_id()
+    AND (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+  )
+);
+
+CREATE POLICY wa_instances_update ON wa_instances FOR UPDATE
+  USING (profile_id = current_user_id() OR current_user_role() = 'admin')
+  WITH CHECK (profile_id = current_user_id() OR current_user_role() = 'admin');
+
+CREATE POLICY wa_instances_delete ON wa_instances FOR DELETE USING (
+  profile_id = current_user_id() OR current_user_role() = 'admin'
 );

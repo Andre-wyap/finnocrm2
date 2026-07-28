@@ -13,6 +13,7 @@ CREATE TYPE gender AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');
 CREATE TYPE activity_type AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore');
+CREATE TYPE wa_instance_status AS ENUM ('disconnected', 'connecting', 'connected');
 
 -- ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ CREATE TABLE profiles (
   role         role NOT NULL,
   team_id      uuid REFERENCES teams(id) ON DELETE SET NULL,
   is_active    boolean NOT NULL DEFAULT true,
+  wa_enabled   boolean NOT NULL DEFAULT false,   -- WhatsApp automation gate (admin-managed)
   created_at   timestamptz NOT NULL DEFAULT now()
 );
 
@@ -92,6 +94,18 @@ ALTER TABLE leads
   ADD CONSTRAINT leads_highlighted_activity_id_fkey
   FOREIGN KEY (highlighted_activity_id) REFERENCES activities(id) ON DELETE SET NULL;
 
+-- One Evolution API instance per WhatsApp-enabled user (§WHATSAPP_AUTOMATION_PLAN)
+CREATE TABLE wa_instances (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id    uuid NOT NULL UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
+  instance_name text NOT NULL UNIQUE,       -- Evolution API instance name (finno_<profile uuid>)
+  status        wa_instance_status NOT NULL DEFAULT 'disconnected',
+  phone_number  text,                       -- connected WhatsApp number (from ownerJid)
+  connected_at  timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
 -- ─── Indexes ──────────────────────────────────────────────────────────────────
 
 CREATE INDEX idx_leads_assigned_agent   ON leads(assigned_agent_id);
@@ -112,6 +126,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON profiles     TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON leads        TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON wa_instances TO app_user;
 
 -- intake_role: only needs to INSERT leads (and read for duplicate check + source→team lookup)
 GRANT SELECT, INSERT ON leads TO intake_role;

@@ -5,7 +5,7 @@ import { onAuthStateChanged, User } from 'firebase/auth'
 import { auth } from '@/lib/firebase/client'
 import type { Profile } from '@/types'
 
-type SessionProfile = Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id'>
+type SessionProfile = Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id' | 'wa_enabled'>
 
 interface AuthContextValue {
   user: User | null

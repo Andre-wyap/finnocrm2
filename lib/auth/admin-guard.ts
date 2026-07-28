@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { resolveUser } from './verify'
 import type { Profile } from '@/types'
 
-type SessionProfile = Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id'>
+type SessionProfile = Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id' | 'wa_enabled'>
 type GuardResult =
   | { profile: SessionProfile; error: null }
   | { profile: null; error: NextResponse }

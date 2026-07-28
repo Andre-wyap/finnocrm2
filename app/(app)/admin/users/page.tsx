@@ -21,6 +21,7 @@ type UserRow = {
   team_id: string | null
   team_name: string | null
   is_active: boolean
+  wa_enabled: boolean
   created_at: string
 }
 
@@ -189,6 +190,14 @@ export default function ManageUsersPage() {
     await apiFetch(`/api/admin/users/${u.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ is_active: !u.is_active }),
+    })
+    await load()
+  }
+
+  async function handleToggleWhatsApp(u: UserRow) {
+    await apiFetch(`/api/admin/users/${u.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ wa_enabled: !u.wa_enabled }),
     })
     await load()
   }
@@ -367,6 +376,7 @@ export default function ManageUsersPage() {
                   <th className="px-5 py-3 text-left">Role</th>
                   <th className="px-5 py-3 text-left">Team</th>
                   <th className="px-5 py-3 text-left">Status</th>
+                  <th className="px-5 py-3 text-left">WhatsApp</th>
                   <th className="px-5 py-3" />
                 </tr>
               </thead>
@@ -388,6 +398,19 @@ export default function ManageUsersPage() {
                         title={u.is_active ? 'Click to deactivate' : 'Click to activate'}
                       >
                         {u.is_active ? 'Active' : 'Inactive'}
+                      </button>
+                    </td>
+                    <td className="px-5 py-3">
+                      <button
+                        onClick={() => handleToggleWhatsApp(u)}
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-pill transition-colors ${
+                          u.wa_enabled
+                            ? 'bg-teal-100 text-teal-700 hover:bg-gray-100 hover:text-gray-500'
+                            : 'bg-gray-100 text-gray-500 hover:bg-teal-100 hover:text-teal-700'
+                        }`}
+                        title={u.wa_enabled ? 'Click to disable WhatsApp automation (also disconnects their number)' : 'Click to enable WhatsApp automation'}
+                      >
+                        {u.wa_enabled ? 'Enabled' : 'Off'}
                       </button>
                     </td>
                     <td className="px-5 py-3 text-right">

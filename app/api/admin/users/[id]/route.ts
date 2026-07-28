@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import { adminAuth } from '@/lib/firebase/admin'
 import { isUuid } from '@/lib/validation'
+import { logoutInstance, deleteInstance } from '@/lib/wa/evolution'
 import type { Role } from '@/types'
 
 const VALID_ROLES = new Set<Role>(['agent', 'team_leader', 'subadmin', 'admin'])
@@ -25,6 +26,7 @@ export async function PATCH(
     role?: Role
     team_id?: string | null
     is_active?: boolean
+    wa_enabled?: boolean
   }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -39,6 +41,9 @@ export async function PATCH(
   }
   if (body.is_active !== undefined && typeof body.is_active !== 'boolean') {
     return NextResponse.json({ error: 'is_active must be a boolean' }, { status: 422 })
+  }
+  if (body.wa_enabled !== undefined && typeof body.wa_enabled !== 'boolean') {
+    return NextResponse.json({ error: 'wa_enabled must be a boolean' }, { status: 422 })
   }
 
   const hasTeamId = 'team_id' in body
@@ -77,6 +82,7 @@ export async function PATCH(
   if (body.role !== undefined) updates.role = body.role
   if (hasTeamId) updates.team_id = normalizedTeamId ?? null
   if (body.is_active !== undefined) updates.is_active = body.is_active
+  if (body.wa_enabled !== undefined) updates.wa_enabled = body.wa_enabled
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
@@ -110,6 +116,29 @@ export async function PATCH(
     await adminAuth.updateUser(existing.firebase_uid, { disabled: false }).catch((e) =>
       console.error('[admin/users PATCH] Firebase enable failed:', e)
     )
+  }
+
+  // Turning the WhatsApp gate off also logs the user's Evolution instance out
+  // (best-effort — an unreachable Evolution server must not block the toggle).
+  if (body.wa_enabled === false) {
+    const [inst] = await withUser(adminProfile.id, (tx) =>
+      tx<{ instance_name: string }[]>`
+        SELECT instance_name FROM wa_instances WHERE profile_id = ${id}::uuid LIMIT 1
+      `
+    )
+    if (inst) {
+      await logoutInstance(inst.instance_name).catch(() => {})
+      await deleteInstance(inst.instance_name).catch((e) =>
+        console.error('[admin/users PATCH] Evolution teardown failed:', e)
+      )
+      await withUser(adminProfile.id, async (tx) => {
+        await tx`
+          UPDATE wa_instances
+          SET status = 'disconnected', phone_number = NULL, connected_at = NULL
+          WHERE profile_id = ${id}::uuid
+        `
+      })
+    }
   }
 
   return NextResponse.json({ ok: true })

@@ -13,6 +13,7 @@ export type ActivityType =
   | 'assignment'
   | 'archive'
   | 'restore'
+export type WaInstanceStatus = 'disconnected' | 'connecting' | 'connected'
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -39,7 +40,19 @@ export interface Profile {
   role: Role
   team_id: string | null
   is_active: boolean
+  wa_enabled: boolean
   created_at: string
+}
+
+export interface WaInstance {
+  id: string
+  profile_id: string
+  instance_name: string
+  status: WaInstanceStatus
+  phone_number: string | null
+  connected_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface Lead {

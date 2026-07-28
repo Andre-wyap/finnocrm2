@@ -9,7 +9,7 @@ import type { Profile } from '@/types'
  */
 export async function resolveUser(
   authHeader: string | null
-): Promise<Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id'> | null> {
+): Promise<Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id' | 'wa_enabled'> | null> {
   if (!authHeader?.startsWith('Bearer ')) return null
 
   const token = authHeader.slice(7)
@@ -25,8 +25,8 @@ export async function resolveUser(
   // Use a SECURITY DEFINER function to bypass the RLS chicken-and-egg:
   // the profiles SELECT policy requires app.current_user_id to be set,
   // but we need the profiles.id to set it in the first place.
-  const rows = await sql<Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id'>[]>`
-    SELECT id, full_name, email, role, team_id
+  const rows = await sql<Pick<Profile, 'id' | 'full_name' | 'email' | 'role' | 'team_id' | 'wa_enabled'>[]>`
+    SELECT id, full_name, email, role, team_id, wa_enabled
     FROM get_profile_by_firebase_uid(${firebaseUid})
   `
 

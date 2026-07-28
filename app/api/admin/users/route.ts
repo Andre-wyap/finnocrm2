@@ -23,10 +23,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       team_id: string | null
       team_name: string | null
       is_active: boolean
+      wa_enabled: boolean
       created_at: string
     }[]>`
       SELECT p.id, p.full_name, p.email, p.phone, p.role,
-             p.team_id, t.name AS team_name, p.is_active, p.created_at
+             p.team_id, t.name AS team_name, p.is_active, p.wa_enabled, p.created_at
       FROM profiles p
       LEFT JOIN teams t ON t.id = p.team_id
       ORDER BY p.created_at
