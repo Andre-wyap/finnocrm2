@@ -16,6 +16,7 @@ export type ActivityType =
   | 'wa_message'
 export type WaInstanceStatus = 'disconnected' | 'connecting' | 'connected'
 export type WaJobStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'cancelled'
+export type WaRunStatus = 'running' | 'completed' | 'cancelled' | 'failed'
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -80,8 +81,46 @@ export interface WaTemplate {
   updated_at: string
 }
 
+export interface WaFlowStep {
+  id: string
+  flow_id: string
+  step_order: number
+  template_id: string
+  template_name: string
+  delay_minutes: number
+}
+
+export interface WaFlow {
+  id: string
+  name: string
+  is_active: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+  steps: WaFlowStep[]
+}
+
+export interface WaFlowRun {
+  id: string
+  flow_id: string
+  flow_name: string
+  lead_id: string
+  sender_profile_id: string
+  sender_name: string
+  status: WaRunStatus
+  current_step: number
+  total_steps: number
+  next_send_at: string | null
+  last_error: string | null
+  started_by: string
+  started_at: string
+  finished_at: string | null
+}
+
 export interface WaJob {
   id: string
+  run_id: string | null
+  flow_step_id: string | null
   lead_id: string
   template_id: string
   sender_profile_id: string

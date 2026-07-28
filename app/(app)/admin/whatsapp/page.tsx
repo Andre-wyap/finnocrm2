@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { FileText, Image as ImageIcon, MessageCircle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useAuth } from '@/lib/auth/context'
 import { apiFetch } from '@/lib/api/client'
+import { FlowManager } from '@/components/wa/FlowManager'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog } from '@/components/ui/dialog'
@@ -40,6 +41,7 @@ export default function WhatsAppAdminPage() {
   const [deleteTarget, setDeleteTarget] = useState<WaTemplate | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [activeTab, setActiveTab] = useState<'templates' | 'flows'>('templates')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const load = useCallback(async () => {
@@ -149,27 +151,47 @@ export default function WhatsAppAdminPage() {
         <div>
           <div className="flex items-center gap-2">
             <MessageCircle size={21} className="text-teal-500" />
-            <h1 className="text-2xl font-bold text-text-primary">WhatsApp Templates</h1>
+            <h1 className="text-2xl font-bold text-text-primary">WhatsApp Automation</h1>
           </div>
           <p className="text-sm text-text-secondary mt-1">
-            Shared messages agents can send from a lead card.
+            Manage reusable messages and timed follow-up flows.
           </p>
         </div>
-        <Button size="sm" onClick={openCreate}>
-          <Plus size={15} /> New Template
-        </Button>
+        {activeTab === 'templates' && (
+          <Button size="sm" onClick={openCreate}>
+            <Plus size={15} /> New Template
+          </Button>
+        )}
       </div>
 
-      {loading ? (
-        <Card className="py-12 text-center text-sm text-text-secondary">Loading…</Card>
-      ) : templates.length === 0 ? (
-        <Card className="py-12 text-center">
-          <p className="font-medium text-text-primary">No templates yet</p>
-          <p className="text-sm text-text-secondary mt-1">Create the first reusable WhatsApp message.</p>
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {templates.map((template) => (
+      <div className="flex gap-1 border-b border-border">
+        {(['templates', 'flows'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`border-b-2 px-4 py-2.5 text-sm font-semibold capitalize transition-colors ${
+              activeTab === tab
+                ? 'border-finno-500 text-finno-500'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'flows' ? (
+        <FlowManager templates={templates} />
+      ) : loading ? (
+          <Card className="py-12 text-center text-sm text-text-secondary">Loading…</Card>
+        ) : templates.length === 0 ? (
+          <Card className="py-12 text-center">
+            <p className="font-medium text-text-primary">No templates yet</p>
+            <p className="text-sm text-text-secondary mt-1">Create the first reusable WhatsApp message.</p>
+          </Card>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {templates.map((template) => (
             <Card key={template.id} className="p-5 flex flex-col gap-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -216,8 +238,8 @@ export default function WhatsAppAdminPage() {
                 </div>
               )}
             </Card>
-          ))}
-        </div>
+            ))}
+          </div>
       )}
 
       <Dialog

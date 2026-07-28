@@ -15,6 +15,7 @@ CREATE TYPE product AS ENUM ('medical', 'critical_illness', 'life', 'personal_ac
 CREATE TYPE activity_type AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore', 'wa_message');
 CREATE TYPE wa_instance_status AS ENUM ('disconnected', 'connecting', 'connected');
 CREATE TYPE wa_job_status AS ENUM ('pending', 'processing', 'sent', 'failed', 'cancelled');
+CREATE TYPE wa_run_status AS ENUM ('running', 'completed', 'cancelled', 'failed');
 
 -- ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -128,8 +129,41 @@ CREATE TABLE wa_templates (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE wa_flows (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+  is_active  boolean NOT NULL DEFAULT true,
+  created_by uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE wa_flow_steps (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  flow_id       uuid NOT NULL REFERENCES wa_flows(id) ON DELETE CASCADE,
+  step_order    integer NOT NULL CHECK (step_order > 0),
+  template_id   uuid NOT NULL REFERENCES wa_templates(id) ON DELETE RESTRICT,
+  delay_minutes integer NOT NULL DEFAULT 0 CHECK (delay_minutes >= 0 AND delay_minutes <= 525600),
+  UNIQUE (flow_id, step_order)
+);
+
+CREATE TABLE wa_flow_runs (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  flow_id           uuid NOT NULL REFERENCES wa_flows(id) ON DELETE RESTRICT,
+  lead_id           uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  sender_profile_id uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  status             wa_run_status NOT NULL DEFAULT 'running',
+  current_step       integer NOT NULL DEFAULT 0 CHECK (current_step >= 0),
+  last_error         text,
+  started_by         uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  started_at         timestamptz NOT NULL DEFAULT now(),
+  finished_at        timestamptz
+);
+
 CREATE TABLE wa_jobs (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id            uuid REFERENCES wa_flow_runs(id) ON DELETE CASCADE,
+  flow_step_id      uuid REFERENCES wa_flow_steps(id) ON DELETE SET NULL,
   lead_id           uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
   template_id       uuid NOT NULL REFERENCES wa_templates(id) ON DELETE RESTRICT,
   sender_profile_id uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
@@ -153,6 +187,9 @@ CREATE INDEX idx_profiles_firebase_uid  ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id       ON profiles(team_id);
 CREATE INDEX idx_team_sources_team_id   ON team_sources(team_id);
 CREATE INDEX idx_wa_jobs_due            ON wa_jobs(status, run_at) WHERE status = 'pending';
+CREATE INDEX idx_wa_jobs_run_id         ON wa_jobs(run_id) WHERE run_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_wa_flow_runs_one_running_per_lead ON wa_flow_runs(lead_id) WHERE status = 'running';
+CREATE INDEX idx_wa_flow_runs_lead      ON wa_flow_runs(lead_id, started_at DESC);
 
 -- ─── Table grants ─────────────────────────────────────────────────────────────
 
@@ -164,10 +201,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON wa_instances TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON wa_media, wa_templates TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON wa_flows, wa_flow_steps, wa_flow_runs TO app_user;
 
 -- intake_role: only needs to INSERT leads (and read for duplicate check + source→team lookup)
 GRANT SELECT, INSERT ON leads TO intake_role;
 GRANT SELECT ON team_sources TO intake_role;
 GRANT SELECT ON profiles, wa_instances, wa_templates, wa_media TO intake_role;
+GRANT SELECT ON wa_flows, wa_flow_steps, wa_flow_runs TO intake_role;
+GRANT INSERT, UPDATE ON wa_flow_runs TO intake_role;
 GRANT SELECT, INSERT, UPDATE ON wa_jobs TO intake_role;
 GRANT INSERT ON activities TO intake_role;

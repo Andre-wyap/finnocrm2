@@ -12,6 +12,9 @@ ALTER TABLE wa_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_media     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_jobs      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_flows     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_runs ENABLE ROW LEVEL SECURITY;
 
 -- Force RLS even for the table owner (keeps testing honest)
 ALTER TABLE leads        FORCE ROW LEVEL SECURITY;
@@ -23,6 +26,9 @@ ALTER TABLE wa_instances FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_media     FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_templates FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_jobs      FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_flows     FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_steps FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_runs FORCE ROW LEVEL SECURITY;
 
 -- ─── leads ────────────────────────────────────────────────────────────────────
 
@@ -267,3 +273,36 @@ CREATE POLICY wa_templates_delete ON wa_templates FOR DELETE USING (
 
 -- wa_jobs intentionally has no app_user policies. The privileged worker owns
 -- all queue reads and transitions.
+
+CREATE POLICY wa_flows_select ON wa_flows FOR SELECT USING (
+  current_user_role() = 'admin'
+  OR (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+);
+CREATE POLICY wa_flows_insert ON wa_flows FOR INSERT WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flows_update ON wa_flows FOR UPDATE
+  USING (current_user_role() = 'admin')
+  WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flows_delete ON wa_flows FOR DELETE USING (current_user_role() = 'admin');
+
+CREATE POLICY wa_flow_steps_select ON wa_flow_steps FOR SELECT USING (
+  flow_id IN (SELECT id FROM wa_flows)
+);
+CREATE POLICY wa_flow_steps_insert ON wa_flow_steps FOR INSERT WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flow_steps_update ON wa_flow_steps FOR UPDATE
+  USING (current_user_role() = 'admin')
+  WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flow_steps_delete ON wa_flow_steps FOR DELETE USING (current_user_role() = 'admin');
+
+CREATE POLICY wa_flow_runs_select ON wa_flow_runs FOR SELECT USING (
+  lead_id IN (SELECT id FROM leads)
+);
+CREATE POLICY wa_flow_runs_insert ON wa_flow_runs FOR INSERT WITH CHECK (
+  lead_id IN (SELECT id FROM leads)
+  AND (
+    current_user_role() = 'admin'
+    OR (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+  )
+);
+CREATE POLICY wa_flow_runs_update ON wa_flow_runs FOR UPDATE
+  USING (started_by = current_user_id() OR current_user_role() = 'admin')
+  WITH CHECK (started_by = current_user_id() OR current_user_role() = 'admin');

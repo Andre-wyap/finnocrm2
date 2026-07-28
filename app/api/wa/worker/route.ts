@@ -4,10 +4,13 @@ import intakeSql from '@/lib/db/intake'
 import { sendMedia, sendText } from '@/lib/wa/evolution'
 import { normalizeWhatsAppNumber } from '@/lib/wa/phone'
 import { renderWhatsAppTemplate } from '@/lib/wa/render'
+import { jitteredDelayMinutes } from '@/lib/wa/schedule'
 
 type ClaimedJob = { id: string }
 type JobPayload = {
   id: string
+  run_id: string | null
+  flow_step_id: string | null
   lead_id: string
   sender_profile_id: string
   attempts: number
@@ -27,6 +30,11 @@ type JobPayload = {
   media_file_name: string | null
   media_mime_type: string | null
   media_data: Buffer | null
+  flow_id: string | null
+  flow_name: string | null
+  run_status: string | null
+  step_order: number | null
+  total_steps: number | null
 }
 
 function validWorkerSecret(req: NextRequest): boolean {
@@ -39,11 +47,22 @@ function validWorkerSecret(req: NextRequest): boolean {
 }
 
 async function failJob(id: string, message: string): Promise<void> {
-  await intakeSql`
-    UPDATE wa_jobs
-    SET status = 'failed', last_error = ${message.slice(0, 1000)}
-    WHERE id = ${id}::uuid
-  `
+  const error = message.slice(0, 1000)
+  await intakeSql.begin(async (tx) => {
+    const [job] = await tx<{ run_id: string | null }[]>`
+      UPDATE wa_jobs
+      SET status = 'failed', last_error = ${error}
+      WHERE id = ${id}::uuid
+      RETURNING run_id
+    `
+    if (job?.run_id) {
+      await tx`
+        UPDATE wa_flow_runs
+        SET status = 'failed', last_error = ${error}, finished_at = now()
+        WHERE id = ${job.run_id}::uuid AND status = 'running'
+      `
+    }
+  })
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -72,31 +91,52 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const results: Array<{ id: string; status: 'sent' | 'failed'; error?: string }> = []
   for (const claimedJob of claimed) {
     const [job] = await intakeSql<JobPayload[]>`
-      SELECT j.id, j.lead_id, j.sender_profile_id, j.attempts,
+      SELECT j.id, j.run_id, j.flow_step_id,
+             j.lead_id, j.sender_profile_id, j.attempts,
              l.full_name, l.mobile, l.state, l.product_interest::text[],
              l.assigned_agent_id, l.status::text AS lead_status, l.archived_at,
              t.name AS template_name, t.body AS template_body,
              wi.instance_name, wi.status::text AS instance_status,
              p.full_name AS sender_name, p.wa_enabled AS sender_enabled,
              m.file_name AS media_file_name, m.mime_type AS media_mime_type,
-             m.data AS media_data
+             m.data AS media_data,
+             r.flow_id, f.name AS flow_name, r.status::text AS run_status,
+             fs.step_order,
+             CASE WHEN r.id IS NULL THEN NULL ELSE (
+               SELECT count(*)::int FROM wa_flow_steps count_steps
+               WHERE count_steps.flow_id = r.flow_id
+             ) END AS total_steps
       FROM wa_jobs j
       JOIN leads l ON l.id = j.lead_id
       JOIN wa_templates t ON t.id = j.template_id
       JOIN profiles p ON p.id = j.sender_profile_id
       LEFT JOIN wa_instances wi ON wi.profile_id = j.sender_profile_id
       LEFT JOIN wa_media m ON m.id = t.media_id
+      LEFT JOIN wa_flow_runs r ON r.id = j.run_id
+      LEFT JOIN wa_flows f ON f.id = r.flow_id
+      LEFT JOIN wa_flow_steps fs ON fs.id = j.flow_step_id
       WHERE j.id = ${claimedJob.id}::uuid
       LIMIT 1
     `
 
     if (!job) {
+      await failJob(claimedJob.id, 'Job payload not found')
       results.push({ id: claimedJob.id, status: 'failed', error: 'Job payload not found' })
       continue
     }
 
     let guardError: string | null = null
-    if (job.archived_at) guardError = 'Lead is archived'
+    if (job.run_id && job.run_status !== 'running') {
+      await intakeSql`
+        UPDATE wa_jobs
+        SET status = 'cancelled', last_error = NULL
+        WHERE id = ${job.id}::uuid
+      `
+      continue
+    }
+    if (job.run_id && (!job.flow_id || !job.flow_step_id || !job.step_order)) {
+      guardError = 'Flow job is missing its run or step'
+    } else if (job.archived_at) guardError = 'Lead is archived'
     else if (job.lead_status === 'lost') guardError = 'Lead is marked lost'
     else if (job.assigned_agent_id !== job.sender_profile_id) guardError = 'Lead is no longer assigned to this sender'
     else if (!job.sender_enabled) guardError = 'Sender is no longer WhatsApp-enabled'
@@ -142,9 +182,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             ${job.lead_id}::uuid,
             ${job.sender_profile_id}::uuid,
             'wa_message',
-            ${`WhatsApp template “${job.template_name}” sent by ${job.sender_name}`}
+            ${
+              job.run_id
+                ? `WhatsApp template “${job.template_name}” sent by ${job.sender_name} (flow “${job.flow_name}”, step ${job.step_order} of ${job.total_steps})`
+                : `WhatsApp template “${job.template_name}” sent by ${job.sender_name}`
+            }
           )
         `
+        if (job.run_id && job.flow_id && job.step_order) {
+          const [runningRun] = await tx<{ id: string }[]>`
+            UPDATE wa_flow_runs
+            SET current_step = ${job.step_order}, last_error = NULL
+            WHERE id = ${job.run_id}::uuid AND status = 'running'
+            RETURNING id
+          `
+          if (runningRun) {
+            const [nextStep] = await tx<{
+              id: string
+              template_id: string
+              delay_minutes: number
+            }[]>`
+              SELECT id, template_id, delay_minutes
+              FROM wa_flow_steps
+              WHERE flow_id = ${job.flow_id}::uuid
+                AND step_order > ${job.step_order}
+              ORDER BY step_order
+              LIMIT 1
+            `
+            if (nextStep) {
+              const delay = jitteredDelayMinutes(nextStep.delay_minutes)
+              await tx`
+                INSERT INTO wa_jobs (
+                  run_id, flow_step_id, lead_id, template_id,
+                  sender_profile_id, run_at
+                )
+                VALUES (
+                  ${job.run_id}::uuid, ${nextStep.id}::uuid,
+                  ${job.lead_id}::uuid, ${nextStep.template_id}::uuid,
+                  ${job.sender_profile_id}::uuid,
+                  now() + (${delay} * interval '1 minute')
+                )
+              `
+            } else {
+              await tx`
+                UPDATE wa_flow_runs
+                SET status = 'completed', finished_at = now()
+                WHERE id = ${job.run_id}::uuid AND status = 'running'
+              `
+            }
+          }
+        }
       })
       results.push({ id: job.id, status: 'sent' })
     } catch (err) {

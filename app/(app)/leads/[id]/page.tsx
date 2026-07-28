@@ -8,6 +8,7 @@ import { getLeadNav } from '@/lib/lead-nav'
 import { insuranceAge } from '@/lib/age'
 import { whatsappChatUrl } from '@/lib/wa/phone'
 import { renderWhatsAppTemplate } from '@/lib/wa/render'
+import { flowDurationLabel } from '@/lib/wa/schedule'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -15,9 +16,9 @@ import { StatusBadge } from '@/components/ui/badge'
 import {
   AlertTriangle, ArrowLeft, MessageCircle, MessageSquare, Phone,
   ArrowRight, Edit2, UserCheck, Send, Archive, ArchiveRestore,
-  ChevronLeft, ChevronRight, Star,
+  ChevronLeft, ChevronRight, Star, Clock3, Workflow, XCircle,
 } from 'lucide-react'
-import type { LeadStatus, ActivityType, WaTemplate } from '@/types'
+import type { LeadStatus, ActivityType, WaFlow, WaFlowRun, WaTemplate } from '@/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,6 +135,17 @@ function formatCreatedAt(ts: string): string {
   })
 }
 
+function formatNextSend(ts: string): string {
+  return new Date(ts).toLocaleString('en-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function leadToDraft(lead: LeadDetail): FormDraft {
   return {
     full_name: lead.full_name,
@@ -242,6 +254,13 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [waSending, setWaSending] = useState(false)
   const [waMessage, setWaMessage] = useState('')
   const [waError, setWaError] = useState('')
+  const [waFlows, setWaFlows] = useState<WaFlow[]>([])
+  const [selectedWaFlowId, setSelectedWaFlowId] = useState('')
+  const [activeWaRun, setActiveWaRun] = useState<WaFlowRun | null>(null)
+  const [waRunLoading, setWaRunLoading] = useState(false)
+  const [waRunStarting, setWaRunStarting] = useState(false)
+  const [waRunCancelling, setWaRunCancelling] = useState(false)
+  const [waRunError, setWaRunError] = useState('')
   const remarkRef = useRef<HTMLTextAreaElement>(null)
 
   const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
@@ -271,6 +290,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     setLoading(false)
   }, [id])
 
+  const loadActiveWaRun = useCallback(async () => {
+    const res = await apiFetch(`/api/wa/runs?lead_id=${id}`)
+    if (res.ok) setActiveWaRun(await res.json())
+  }, [id])
+
   useEffect(() => {
     loadLead()
     loadActivities()
@@ -286,8 +310,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     setSelectedAgentId('')
     setLostConfirm(false)
     setSelectedWaTemplateId('')
+    setSelectedWaFlowId('')
+    setActiveWaRun(null)
     setWaMessage('')
     setWaError('')
+    setWaRunError('')
   }, [id])
 
   useEffect(() => {
@@ -301,12 +328,26 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     if (!profile?.wa_enabled) return
     setWaTemplatesLoading(true)
-    apiFetch('/api/wa/templates')
-      .then(async (res) => {
+    setWaRunLoading(true)
+    Promise.all([
+      apiFetch('/api/wa/templates').then(async (res) => {
         if (res.ok) setWaTemplates(await res.json())
-      })
-      .finally(() => setWaTemplatesLoading(false))
-  }, [profile?.wa_enabled])
+      }),
+      apiFetch('/api/wa/flows').then(async (res) => {
+        if (res.ok) setWaFlows(await res.json())
+      }),
+      loadActiveWaRun(),
+    ]).finally(() => {
+      setWaTemplatesLoading(false)
+      setWaRunLoading(false)
+    })
+  }, [profile?.wa_enabled, loadActiveWaRun])
+
+  useEffect(() => {
+    if (!activeWaRun?.id) return
+    const timer = window.setInterval(loadActiveWaRun, 30_000)
+    return () => window.clearInterval(timer)
+  }, [activeWaRun?.id, loadActiveWaRun])
 
   function setField<K extends keyof FormDraft>(key: K, value: FormDraft[K]) {
     setDraft((d) => d ? { ...d, [key]: value } : d)
@@ -528,6 +569,45 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  async function handleStartWhatsAppFlow() {
+    if (!selectedWaFlowId) return
+    setWaRunStarting(true)
+    setWaRunError('')
+    try {
+      const res = await apiFetch('/api/wa/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flow_id: selectedWaFlowId, lead_ids: [id] }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setWaRunError(data.skipped?.[0]?.reason ?? data.error ?? 'Could not start flow')
+        return
+      }
+      setSelectedWaFlowId('')
+      await loadActiveWaRun()
+    } finally {
+      setWaRunStarting(false)
+    }
+  }
+
+  async function handleCancelWhatsAppFlow() {
+    if (!activeWaRun) return
+    setWaRunCancelling(true)
+    setWaRunError('')
+    try {
+      const res = await apiFetch(`/api/wa/runs/${activeWaRun.id}/cancel`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) {
+        setWaRunError(data.error ?? 'Could not cancel flow')
+        return
+      }
+      setActiveWaRun(null)
+    } finally {
+      setWaRunCancelling(false)
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -558,6 +638,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       }).text
     : ''
   const canSendWhatsApp = profile?.wa_enabled && lead.assigned_agent_id === profile.id
+  const selectedWaFlow = waFlows.find((flow) => flow.id === selectedWaFlowId)
+  const selectedWaFlowDelay = selectedWaFlow?.steps.reduce(
+    (total, step) => total + step.delay_minutes,
+    0
+  ) ?? 0
 
   return (
     <div>
@@ -980,6 +1065,94 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                   >
                     <Send size={14} /> Send Template
                   </Button>
+
+                  <div className="border-t border-teal-500/20 pt-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Workflow size={15} className="text-teal-600" />
+                      <h4 className="text-sm font-semibold text-text-primary">Follow-up Flow</h4>
+                    </div>
+
+                    {waRunLoading ? (
+                      <p className="text-sm text-text-secondary">Checking active flow…</p>
+                    ) : activeWaRun ? (
+                      <div className="rounded-button border border-teal-200 bg-white p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-text-primary">{activeWaRun.flow_name}</p>
+                            <p className="text-xs text-text-secondary mt-0.5">
+                              {activeWaRun.current_step} of {activeWaRun.total_steps} steps sent
+                            </p>
+                          </div>
+                          <span className="rounded-pill bg-teal-100 px-2 py-0.5 text-xs font-semibold text-teal-700">
+                            Running
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-teal-100">
+                          <div
+                            className="h-full rounded-full bg-teal-500 transition-all"
+                            style={{
+                              width: `${activeWaRun.total_steps
+                                ? (activeWaRun.current_step / activeWaRun.total_steps) * 100
+                                : 0}%`,
+                            }}
+                          />
+                        </div>
+                        {activeWaRun.next_send_at && (
+                          <p className="flex items-center gap-1.5 text-xs text-text-secondary">
+                            <Clock3 size={13} />
+                            Next send: {formatNextSend(activeWaRun.next_send_at)} MYT
+                          </p>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={handleCancelWhatsAppFlow}
+                          loading={waRunCancelling}
+                          className="text-red-500 hover:bg-red-50"
+                        >
+                          <XCircle size={14} /> Cancel Flow
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <Select
+                          label="Flow"
+                          value={selectedWaFlowId}
+                          onChange={(event) => {
+                            setSelectedWaFlowId(event.target.value)
+                            setWaRunError('')
+                          }}
+                        >
+                          <option value="">Select flow…</option>
+                          {waFlows.map((flow) => (
+                            <option key={flow.id} value={flow.id}>{flow.name}</option>
+                          ))}
+                        </Select>
+                        {selectedWaFlow && (
+                          <p className="text-xs text-text-secondary">
+                            {selectedWaFlow.steps.length}{' '}
+                            {selectedWaFlow.steps.length === 1 ? 'step' : 'steps'} over approximately{' '}
+                            {flowDurationLabel(selectedWaFlowDelay)}.
+                          </p>
+                        )}
+                        {waFlows.length === 0 && (
+                          <p className="text-xs text-text-secondary">
+                            No active flows are available. Ask an admin to create one.
+                          </p>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="accent"
+                          onClick={handleStartWhatsAppFlow}
+                          disabled={!selectedWaFlowId}
+                          loading={waRunStarting}
+                        >
+                          <Workflow size={14} /> Start Flow
+                        </Button>
+                      </>
+                    )}
+                    {waRunError && <p className="text-sm text-red-500">{waRunError}</p>}
+                  </div>
                 </>
               )}
             </div>

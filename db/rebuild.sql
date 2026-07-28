@@ -10,6 +10,9 @@ BEGIN;
 
 -- ─── 0. Teardown (drop wrong tables + enums) ──────────────────────────────────
 DROP TABLE IF EXISTS wa_jobs      CASCADE;
+DROP TABLE IF EXISTS wa_flow_runs CASCADE;
+DROP TABLE IF EXISTS wa_flow_steps CASCADE;
+DROP TABLE IF EXISTS wa_flows     CASCADE;
 DROP TABLE IF EXISTS wa_templates CASCADE;
 DROP TABLE IF EXISTS wa_media     CASCADE;
 DROP TABLE IF EXISTS wa_instances CASCADE;
@@ -21,6 +24,7 @@ DROP TABLE IF EXISTS teams        CASCADE;
 
 DROP TYPE IF EXISTS wa_instance_status CASCADE;
 DROP TYPE IF EXISTS wa_job_status CASCADE;
+DROP TYPE IF EXISTS wa_run_status CASCADE;
 DROP TYPE IF EXISTS activity_type  CASCADE;
 DROP TYPE IF EXISTS product        CASCADE;
 DROP TYPE IF EXISTS smoking_status CASCADE;
@@ -38,6 +42,7 @@ CREATE TYPE product        AS ENUM ('medical', 'critical_illness', 'life', 'pers
 CREATE TYPE activity_type  AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore', 'wa_message');
 CREATE TYPE wa_instance_status AS ENUM ('disconnected', 'connecting', 'connected');
 CREATE TYPE wa_job_status AS ENUM ('pending', 'processing', 'sent', 'failed', 'cancelled');
+CREATE TYPE wa_run_status AS ENUM ('running', 'completed', 'cancelled', 'failed');
 
 -- ─── 2. Tables ────────────────────────────────────────────────────────────────
 CREATE TABLE teams (
@@ -145,8 +150,41 @@ CREATE TABLE wa_templates (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE wa_flows (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+  is_active  boolean NOT NULL DEFAULT true,
+  created_by uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE wa_flow_steps (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  flow_id       uuid NOT NULL REFERENCES wa_flows(id) ON DELETE CASCADE,
+  step_order    integer NOT NULL CHECK (step_order > 0),
+  template_id   uuid NOT NULL REFERENCES wa_templates(id) ON DELETE RESTRICT,
+  delay_minutes integer NOT NULL DEFAULT 0 CHECK (delay_minutes >= 0 AND delay_minutes <= 525600),
+  UNIQUE (flow_id, step_order)
+);
+
+CREATE TABLE wa_flow_runs (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  flow_id           uuid NOT NULL REFERENCES wa_flows(id) ON DELETE RESTRICT,
+  lead_id           uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  sender_profile_id uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  status             wa_run_status NOT NULL DEFAULT 'running',
+  current_step       integer NOT NULL DEFAULT 0 CHECK (current_step >= 0),
+  last_error         text,
+  started_by         uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  started_at         timestamptz NOT NULL DEFAULT now(),
+  finished_at        timestamptz
+);
+
 CREATE TABLE wa_jobs (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id            uuid REFERENCES wa_flow_runs(id) ON DELETE CASCADE,
+  flow_step_id      uuid REFERENCES wa_flow_steps(id) ON DELETE SET NULL,
   lead_id           uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
   template_id       uuid NOT NULL REFERENCES wa_templates(id) ON DELETE RESTRICT,
   sender_profile_id uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
@@ -169,6 +207,9 @@ CREATE INDEX idx_profiles_firebase_uid ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id      ON profiles(team_id);
 CREATE INDEX idx_team_sources_team_id  ON team_sources(team_id);
 CREATE INDEX idx_wa_jobs_due           ON wa_jobs(status, run_at) WHERE status = 'pending';
+CREATE INDEX idx_wa_jobs_run_id        ON wa_jobs(run_id) WHERE run_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_wa_flow_runs_one_running_per_lead ON wa_flow_runs(lead_id) WHERE status = 'running';
+CREATE INDEX idx_wa_flow_runs_lead     ON wa_flow_runs(lead_id, started_at DESC);
 
 -- ─── 4. Grants (roles already exist) ──────────────────────────────────────────
 GRANT SELECT, INSERT, UPDATE, DELETE ON teams        TO app_user;
@@ -178,9 +219,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON wa_instances TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON wa_media, wa_templates TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON wa_flows, wa_flow_steps, wa_flow_runs TO app_user;
 GRANT SELECT, INSERT ON leads TO intake_role;
 GRANT SELECT ON team_sources TO intake_role;
 GRANT SELECT ON profiles, wa_instances, wa_templates, wa_media TO intake_role;
+GRANT SELECT ON wa_flows, wa_flow_steps, wa_flow_runs TO intake_role;
+GRANT INSERT, UPDATE ON wa_flow_runs TO intake_role;
 GRANT SELECT, INSERT, UPDATE ON wa_jobs TO intake_role;
 GRANT INSERT ON activities TO intake_role;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
@@ -239,6 +283,10 @@ CREATE TRIGGER wa_instances_updated_at
 
 CREATE TRIGGER wa_templates_updated_at
   BEFORE UPDATE ON wa_templates
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER wa_flows_updated_at
+  BEFORE UPDATE ON wa_flows
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE OR REPLACE FUNCTION log_lead_changes()
@@ -317,6 +365,9 @@ ALTER TABLE wa_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_media     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_jobs      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_flows     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_runs ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE leads        FORCE ROW LEVEL SECURITY;
 ALTER TABLE profiles     FORCE ROW LEVEL SECURITY;
@@ -327,6 +378,9 @@ ALTER TABLE wa_instances FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_media     FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_templates FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_jobs      FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_flows     FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_steps FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_flow_runs FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY leads_select ON leads FOR SELECT USING (
   CASE current_user_role()
@@ -470,6 +524,39 @@ CREATE POLICY wa_templates_update ON wa_templates FOR UPDATE
   USING (current_user_role() = 'admin')
   WITH CHECK (current_user_role() = 'admin');
 CREATE POLICY wa_templates_delete ON wa_templates FOR DELETE USING (current_user_role() = 'admin');
+
+CREATE POLICY wa_flows_select ON wa_flows FOR SELECT USING (
+  current_user_role() = 'admin'
+  OR (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+);
+CREATE POLICY wa_flows_insert ON wa_flows FOR INSERT WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flows_update ON wa_flows FOR UPDATE
+  USING (current_user_role() = 'admin')
+  WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flows_delete ON wa_flows FOR DELETE USING (current_user_role() = 'admin');
+
+CREATE POLICY wa_flow_steps_select ON wa_flow_steps FOR SELECT USING (
+  flow_id IN (SELECT id FROM wa_flows)
+);
+CREATE POLICY wa_flow_steps_insert ON wa_flow_steps FOR INSERT WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flow_steps_update ON wa_flow_steps FOR UPDATE
+  USING (current_user_role() = 'admin')
+  WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_flow_steps_delete ON wa_flow_steps FOR DELETE USING (current_user_role() = 'admin');
+
+CREATE POLICY wa_flow_runs_select ON wa_flow_runs FOR SELECT USING (
+  lead_id IN (SELECT id FROM leads)
+);
+CREATE POLICY wa_flow_runs_insert ON wa_flow_runs FOR INSERT WITH CHECK (
+  lead_id IN (SELECT id FROM leads)
+  AND (
+    current_user_role() = 'admin'
+    OR (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+  )
+);
+CREATE POLICY wa_flow_runs_update ON wa_flow_runs FOR UPDATE
+  USING (started_by = current_user_id() OR current_user_role() = 'admin')
+  WITH CHECK (started_by = current_user_id() OR current_user_role() = 'admin');
 
 -- ─── 8. Re-insert bootstrap admin ─────────────────────────────────────────────
 INSERT INTO profiles (firebase_uid, full_name, email, role, is_active)
