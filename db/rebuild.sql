@@ -192,6 +192,7 @@ CREATE TABLE wa_jobs (
   status             wa_job_status NOT NULL DEFAULT 'pending',
   attempts           integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   last_error         text,
+  processing_started_at timestamptz,
   sent_at            timestamptz,
   created_at         timestamptz NOT NULL DEFAULT now()
 );
@@ -208,6 +209,7 @@ CREATE INDEX idx_profiles_team_id      ON profiles(team_id);
 CREATE INDEX idx_team_sources_team_id  ON team_sources(team_id);
 CREATE INDEX idx_wa_jobs_due           ON wa_jobs(status, run_at) WHERE status = 'pending';
 CREATE INDEX idx_wa_jobs_run_id        ON wa_jobs(run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX idx_wa_jobs_processing_started ON wa_jobs(processing_started_at) WHERE status = 'processing';
 CREATE UNIQUE INDEX idx_wa_flow_runs_one_running_per_lead ON wa_flow_runs(lead_id) WHERE status = 'running';
 CREATE INDEX idx_wa_flow_runs_lead     ON wa_flow_runs(lead_id, started_at DESC);
 

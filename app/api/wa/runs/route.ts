@@ -3,7 +3,12 @@ import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import intakeSql from '@/lib/db/intake'
 import { isUuid } from '@/lib/validation'
-import { jitteredDelayMinutes } from '@/lib/wa/schedule'
+import {
+  bulkStaggerMinutes,
+  getWhatsAppSafetyConfig,
+  jitteredDelayMinutes,
+  nextAllowedWhatsAppSendAt,
+} from '@/lib/wa/schedule'
 import type { WaFlowRun } from '@/types'
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -25,7 +30,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       JOIN wa_flows f ON f.id = r.flow_id
       JOIN profiles p ON p.id = r.sender_profile_id
       WHERE r.lead_id = ${leadId}::uuid
-        AND r.status = 'running'
       ORDER BY r.started_at DESC
       LIMIT 1
     `
@@ -33,13 +37,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const run = rows[0]
   if (!run) return NextResponse.json(null)
 
-  const [nextJob] = await intakeSql<{ run_at: string }[]>`
-    SELECT run_at
-    FROM wa_jobs
-    WHERE run_id = ${run.id}::uuid AND status = 'pending'
-    ORDER BY run_at
-    LIMIT 1
-  `
+  const [nextJob] = run.status === 'running'
+    ? await intakeSql<{ run_at: string }[]>`
+        SELECT run_at
+        FROM wa_jobs
+        WHERE run_id = ${run.id}::uuid AND status = 'pending'
+        ORDER BY run_at
+        LIMIT 1
+      `
+    : []
   return NextResponse.json({ ...run, next_send_at: nextJob?.run_at ?? null })
 }
 
@@ -97,8 +103,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   )
   const visibleIds = new Set(visibleLeads.map((lead) => lead.id))
 
-  const started: Array<{ lead_id: string; run_id: string }> = []
+  const started: Array<{ lead_id: string; run_id: string; run_at: string }> = []
   const skipped: Array<{ lead_id: string; reason: string }> = []
+  const senderPositions = new Map<string, number>()
+  const baseDelay = jitteredDelayMinutes(flow.first_delay_minutes)
+  const safety = getWhatsAppSafetyConfig()
   for (const leadId of leadIds) {
     if (!visibleIds.has(leadId)) {
       skipped.push({ lead_id: leadId, reason: 'Lead is unavailable, archived, lost, or outside your access' })
@@ -129,7 +138,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     try {
-      const runId = await intakeSql.begin(async (tx) => {
+      const senderPosition = senderPositions.get(sender.sender_profile_id) ?? 0
+      const stagger = leadIds.length > 1 ? bulkStaggerMinutes(senderPosition) : 0
+      const candidateRunAt = new Date(Date.now() + (baseDelay + stagger) * 60_000)
+      const scheduledRunAt = nextAllowedWhatsAppSendAt(candidateRunAt, safety.quietHours)
+      const scheduled = await intakeSql.begin(async (tx) => {
         const [run] = await tx<{ id: string }[]>`
           INSERT INTO wa_flow_runs (
             flow_id, lead_id, sender_profile_id, status, current_step, started_by
@@ -140,20 +153,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           )
           RETURNING id
         `
-        const delay = jitteredDelayMinutes(flow.first_delay_minutes)
-        await tx`
+        const [job] = await tx<{ run_at: string }[]>`
           INSERT INTO wa_jobs (
             run_id, flow_step_id, lead_id, template_id, sender_profile_id, run_at
           )
           VALUES (
             ${run.id}::uuid, ${flow.first_step_id}::uuid, ${leadId}::uuid,
             ${flow.first_template_id}::uuid, ${sender.sender_profile_id}::uuid,
-            now() + (${delay} * interval '1 minute')
+            ${scheduledRunAt}
           )
+          RETURNING run_at
         `
-        return run.id
+        return { runId: run.id, runAt: job.run_at }
       })
-      started.push({ lead_id: leadId, run_id: runId })
+      senderPositions.set(sender.sender_profile_id, senderPosition + 1)
+      started.push({ lead_id: leadId, run_id: scheduled.runId, run_at: scheduled.runAt })
     } catch (err) {
       if ((err as { code?: string }).code === '23505') {
         skipped.push({ lead_id: leadId, reason: 'Lead already has an active flow' })

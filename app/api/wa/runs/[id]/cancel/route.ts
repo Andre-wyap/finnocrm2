@@ -52,7 +52,8 @@ export async function POST(
     `
     await tx`
       UPDATE wa_jobs
-      SET status = 'cancelled', last_error = 'Flow cancelled'
+      SET status = 'cancelled', last_error = 'Flow cancelled',
+          processing_started_at = NULL
       WHERE run_id = ${id}::uuid AND status IN ('pending', 'processing')
     `
   })

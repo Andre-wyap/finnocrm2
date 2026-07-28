@@ -344,10 +344,10 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   }, [profile?.wa_enabled, loadActiveWaRun])
 
   useEffect(() => {
-    if (!activeWaRun?.id) return
+    if (!activeWaRun?.id || activeWaRun.status !== 'running') return
     const timer = window.setInterval(loadActiveWaRun, 30_000)
     return () => window.clearInterval(timer)
-  }, [activeWaRun?.id, loadActiveWaRun])
+  }, [activeWaRun?.id, activeWaRun?.status, loadActiveWaRun])
 
   function setField<K extends keyof FormDraft>(key: K, value: FormDraft[K]) {
     setDraft((d) => d ? { ...d, [key]: value } : d)
@@ -563,7 +563,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         setWaError(data.error ?? 'Could not queue WhatsApp message')
         return
       }
-      setWaMessage('Message queued. It will send within about one minute.')
+      setWaMessage(
+        'Message queued. It normally sends within one minute, subject to quiet hours and the daily cap.'
+      )
     } finally {
       setWaSending(false)
     }
@@ -602,7 +604,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
         setWaRunError(data.error ?? 'Could not cancel flow')
         return
       }
-      setActiveWaRun(null)
+      await loadActiveWaRun()
     } finally {
       setWaRunCancelling(false)
     }
@@ -643,6 +645,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     (total, step) => total + step.delay_minutes,
     0
   ) ?? 0
+  const hasRunningWaFlow = activeWaRun?.status === 'running'
 
   return (
     <div>
@@ -1074,7 +1077,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
 
                     {waRunLoading ? (
                       <p className="text-sm text-text-secondary">Checking active flow…</p>
-                    ) : activeWaRun ? (
+                    ) : hasRunningWaFlow && activeWaRun ? (
                       <div className="rounded-button border border-teal-200 bg-white p-3 space-y-2">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -1103,6 +1106,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                             Next send: {formatNextSend(activeWaRun.next_send_at)} MYT
                           </p>
                         )}
+                        {activeWaRun.last_error && (
+                          <p className="rounded-button bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
+                            {activeWaRun.last_error}
+                          </p>
+                        )}
                         <Button
                           size="sm"
                           variant="ghost"
@@ -1115,6 +1123,38 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                       </div>
                     ) : (
                       <>
+                        {activeWaRun && (
+                          <div className={`rounded-button border p-3 ${
+                            activeWaRun.status === 'failed'
+                              ? 'border-red-200 bg-red-50'
+                              : activeWaRun.status === 'completed'
+                                ? 'border-teal-200 bg-white'
+                                : 'border-gray-200 bg-white'
+                          }`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-text-primary">
+                                  {activeWaRun.flow_name}
+                                </p>
+                                <p className="text-xs text-text-secondary mt-0.5">
+                                  {activeWaRun.current_step} of {activeWaRun.total_steps} steps sent
+                                </p>
+                              </div>
+                              <span className={`rounded-pill px-2 py-0.5 text-xs font-semibold capitalize ${
+                                activeWaRun.status === 'failed'
+                                  ? 'bg-red-100 text-red-700'
+                                  : activeWaRun.status === 'completed'
+                                    ? 'bg-teal-100 text-teal-700'
+                                    : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {activeWaRun.status}
+                              </span>
+                            </div>
+                            {activeWaRun.last_error && (
+                              <p className="mt-2 text-xs text-red-700">{activeWaRun.last_error}</p>
+                            )}
+                          </div>
+                        )}
                         <Select
                           label="Flow"
                           value={selectedWaFlowId}

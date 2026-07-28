@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'node:crypto'
 import intakeSql from '@/lib/db/intake'
-import { sendMedia, sendText } from '@/lib/wa/evolution'
+import { EvolutionError, sendMedia, sendText } from '@/lib/wa/evolution'
 import { normalizeWhatsAppNumber } from '@/lib/wa/phone'
 import { renderWhatsAppTemplate } from '@/lib/wa/render'
-import { jitteredDelayMinutes } from '@/lib/wa/schedule'
+import {
+  getWhatsAppSafetyConfig,
+  jitteredDelayMinutes,
+  nextAllowedWhatsAppSendAt,
+  nextWhatsAppDailyWindowAt,
+  retryBackoffMinutes,
+} from '@/lib/wa/schedule'
 
 type ClaimedJob = { id: string }
 type JobPayload = {
@@ -51,8 +57,8 @@ async function failJob(id: string, message: string): Promise<void> {
   await intakeSql.begin(async (tx) => {
     const [job] = await tx<{ run_id: string | null }[]>`
       UPDATE wa_jobs
-      SET status = 'failed', last_error = ${error}
-      WHERE id = ${id}::uuid
+      SET status = 'failed', last_error = ${error}, processing_started_at = NULL
+      WHERE id = ${id}::uuid AND status = 'processing'
       RETURNING run_id
     `
     if (job?.run_id) {
@@ -65,17 +71,90 @@ async function failJob(id: string, message: string): Promise<void> {
   })
 }
 
+async function deferJob(id: string, runAt: Date, reason: string): Promise<void> {
+  await intakeSql`
+    UPDATE wa_jobs
+    SET status = 'pending', run_at = ${runAt},
+        last_error = ${reason.slice(0, 1000)}, processing_started_at = NULL
+    WHERE id = ${id}::uuid AND status = 'processing'
+  `
+}
+
+async function retryJob(
+  id: string,
+  runAt: Date,
+  attempt: number,
+  maxAttempts: number,
+  message: string
+): Promise<void> {
+  const error = message.slice(0, 1000)
+  await intakeSql.begin(async (tx) => {
+    const [job] = await tx<{ run_id: string | null }[]>`
+      UPDATE wa_jobs
+      SET status = 'pending', run_at = ${runAt},
+          last_error = ${error}, processing_started_at = NULL
+      WHERE id = ${id}::uuid AND status = 'processing'
+      RETURNING run_id
+    `
+    if (job?.run_id) {
+      await tx`
+        UPDATE wa_flow_runs
+        SET last_error = ${`Send attempt ${attempt} of ${maxAttempts} failed; retry scheduled: ${error}`.slice(0, 1000)}
+        WHERE id = ${job.run_id}::uuid AND status = 'running'
+      `
+    }
+  })
+}
+
+function isTransientSendError(error: unknown): boolean {
+  return error instanceof EvolutionError
+    && (error.status === 408 || error.status === 429 || error.status >= 500)
+}
+
+async function failExpiredProcessingJobs(): Promise<number> {
+  return intakeSql.begin(async (tx) => {
+    const message =
+      'Worker execution was interrupted; message was not retried to avoid duplicate delivery'
+    const jobs = await tx<{ run_id: string | null }[]>`
+      UPDATE wa_jobs
+      SET status = 'failed', last_error = ${message}, processing_started_at = NULL
+      WHERE status = 'processing'
+        AND processing_started_at <= now() - interval '15 minutes'
+      RETURNING run_id
+    `
+    const runIds = [...new Set(
+      jobs.map((job) => job.run_id).filter((runId): runId is string => Boolean(runId))
+    )]
+    for (const runId of runIds) {
+      await tx`
+        UPDATE wa_flow_runs
+        SET status = 'failed', last_error = ${message}, finished_at = now()
+        WHERE id = ${runId}::uuid AND status = 'running'
+      `
+    }
+    return jobs.length
+  })
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!validWorkerSecret(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  return NextResponse.json({ ok: true })
+  const safety = getWhatsAppSafetyConfig()
+  return NextResponse.json({
+    ok: true,
+    daily_send_cap: safety.dailySendCap,
+    quiet_hours: safety.quietHours.label,
+    max_attempts: safety.maxAttempts,
+  })
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!validWorkerSecret(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const safety = getWhatsAppSafetyConfig()
+  const expired = await failExpiredProcessingJobs()
 
   const claimed = await intakeSql.begin(async (tx) =>
     tx<ClaimedJob[]>`
@@ -88,14 +167,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         LIMIT 20
       )
       UPDATE wa_jobs j
-      SET status = 'processing', attempts = attempts + 1, last_error = NULL
+      SET status = 'processing', processing_started_at = now()
       FROM picked
       WHERE j.id = picked.id
       RETURNING j.id
     `
   )
 
-  const results: Array<{ id: string; status: 'sent' | 'failed'; error?: string }> = []
+  const results: Array<{
+    id: string
+    status: 'sent' | 'failed' | 'retrying' | 'deferred' | 'cancelled'
+    error?: string
+    run_at?: string
+  }> = []
   for (const claimedJob of claimed) {
     const [job] = await intakeSql<JobPayload[]>`
       SELECT j.id, j.run_id, j.flow_step_id,
@@ -136,11 +220,40 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (job.run_id && job.run_status !== 'running') {
       await intakeSql`
         UPDATE wa_jobs
-        SET status = 'cancelled', last_error = NULL
+        SET status = 'cancelled', last_error = NULL, processing_started_at = NULL
         WHERE id = ${job.id}::uuid
       `
+      results.push({ id: job.id, status: 'cancelled' })
       continue
     }
+
+    const now = new Date()
+    const allowedAt = nextAllowedWhatsAppSendAt(now, safety.quietHours)
+    if (allowedAt.getTime() > now.getTime()) {
+      const reason = `Deferred by WhatsApp quiet hours (${safety.quietHours.label} MYT)`
+      await deferJob(job.id, allowedAt, reason)
+      results.push({ id: job.id, status: 'deferred', run_at: allowedAt.toISOString() })
+      continue
+    }
+
+    const [dailyUsage] = await intakeSql<{ sent_count: number }[]>`
+      SELECT count(*)::int AS sent_count
+      FROM wa_jobs
+      WHERE sender_profile_id = ${job.sender_profile_id}::uuid
+        AND status = 'sent'
+        AND sent_at >= (
+          date_trunc('day', now() AT TIME ZONE 'Asia/Kuala_Lumpur')
+          AT TIME ZONE 'Asia/Kuala_Lumpur'
+        )
+    `
+    if (dailyUsage.sent_count >= safety.dailySendCap) {
+      const nextWindow = nextWhatsAppDailyWindowAt(now, safety.quietHours)
+      const reason = `Deferred because this sender reached the daily cap of ${safety.dailySendCap}`
+      await deferJob(job.id, nextWindow, reason)
+      results.push({ id: job.id, status: 'deferred', run_at: nextWindow.toISOString() })
+      continue
+    }
+
     if (job.run_id && (!job.flow_id || !job.flow_step_id || !job.step_order)) {
       guardError = 'Flow job is missing its run or step'
     } else if (job.archived_at) guardError = 'Lead is archived'
@@ -156,6 +269,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       results.push({ id: job.id, status: 'failed', error: guardError })
       continue
     }
+
+    const [attemptRow] = await intakeSql<{ attempts: number }[]>`
+      UPDATE wa_jobs
+      SET attempts = attempts + 1, last_error = NULL
+      WHERE id = ${job.id}::uuid AND status = 'processing'
+      RETURNING attempts
+    `
+    if (!attemptRow) {
+      results.push({ id: job.id, status: 'cancelled' })
+      continue
+    }
+    const attempt = attemptRow.attempts
 
     const rendered = renderWhatsAppTemplate(job.template_body, {
       full_name: job.full_name,
@@ -176,11 +301,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       } else {
         await sendText(job.instance_name!, number!, rendered.text)
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (attempt < safety.maxAttempts && isTransientSendError(err)) {
+        const retryAt = nextAllowedWhatsAppSendAt(
+          new Date(Date.now() + retryBackoffMinutes(attempt) * 60_000),
+          safety.quietHours
+        )
+        await retryJob(job.id, retryAt, attempt, safety.maxAttempts, message)
+        results.push({
+          id: job.id,
+          status: 'retrying',
+          error: message,
+          run_at: retryAt.toISOString(),
+        })
+      } else {
+        await failJob(job.id, message)
+        results.push({ id: job.id, status: 'failed', error: message })
+      }
+      continue
+    }
 
+    try {
       await intakeSql.begin(async (tx) => {
         await tx`
           UPDATE wa_jobs
-          SET status = 'sent', sent_at = now(), last_error = NULL
+          SET status = 'sent', sent_at = now(), last_error = NULL,
+              processing_started_at = NULL
           WHERE id = ${job.id}::uuid
         `
         await tx`
@@ -218,6 +365,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             `
             if (nextStep) {
               const delay = jitteredDelayMinutes(nextStep.delay_minutes)
+              const candidateRunAt = new Date(Date.now() + delay * 60_000)
+              const scheduledRunAt = nextAllowedWhatsAppSendAt(
+                candidateRunAt,
+                safety.quietHours
+              )
               await tx`
                 INSERT INTO wa_jobs (
                   run_id, flow_step_id, lead_id, template_id,
@@ -227,7 +379,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                   ${job.run_id}::uuid, ${nextStep.id}::uuid,
                   ${job.lead_id}::uuid, ${nextStep.template_id}::uuid,
                   ${job.sender_profile_id}::uuid,
-                  now() + (${delay} * interval '1 minute')
+                  ${scheduledRunAt}
                 )
               `
             } else {
@@ -242,16 +394,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       })
       results.push({ id: job.id, status: 'sent' })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const detail = err instanceof Error ? err.message : String(err)
+      const message = `WhatsApp accepted the message, but CRM finalization failed; not retrying to avoid a duplicate: ${detail}`
       await failJob(job.id, message)
       results.push({ id: job.id, status: 'failed', error: message })
     }
   }
 
   return NextResponse.json({
+    expired,
     claimed: claimed.length,
     sent: results.filter((item) => item.status === 'sent').length,
     failed: results.filter((item) => item.status === 'failed').length,
+    retrying: results.filter((item) => item.status === 'retrying').length,
+    deferred: results.filter((item) => item.status === 'deferred').length,
+    cancelled: results.filter((item) => item.status === 'cancelled').length,
     results,
   })
 }

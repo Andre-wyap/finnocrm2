@@ -1,12 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth/context'
 import { apiFetch } from '@/lib/api/client'
 import { StatusBadge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { DashboardWidgets } from '@/components/dashboard/DashboardWidgets'
+import {
+  BulkFlowAction,
+  bulkFlowOutcomeMessage,
+  type BulkFlowOutcome,
+} from '@/components/wa/BulkFlowAction'
 import { AlertTriangle, Star } from 'lucide-react'
 import { setLeadNav } from '@/lib/lead-nav'
 import { insuranceAge } from '@/lib/age'
@@ -57,6 +62,7 @@ const LIMIT = 50
 // Leads list shown on the dashboard for agents only.
 function AgentLeadsList() {
   const router = useRouter()
+  const { profile } = useAuth()
 
   const [leads,   setLeads]   = useState<LeadRow[]>([])
   const [total,   setTotal]   = useState(0)
@@ -65,6 +71,16 @@ function AgentLeadsList() {
 
   const [statusFilter,  setStatusFilter]  = useState('')
   const [productFilter, setProductFilter] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkFlowMsg, setBulkFlowMsg] = useState('')
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  const waBulkEnabled = Boolean(profile?.wa_enabled)
+  const allSelected = leads.length > 0 && selectedIds.size === leads.length
+  const someSelected = selectedIds.size > 0 && selectedIds.size < leads.length
+
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected
+  }, [someSelected])
 
   const load = useCallback(async (off = 0) => {
     setLoading(true)
@@ -81,7 +97,28 @@ function AgentLeadsList() {
     setLoading(false)
   }, [statusFilter, productFilter])
 
-  useEffect(() => { load(0) }, [load])
+  useEffect(() => {
+    load(0)
+    setSelectedIds(new Set())
+  }, [load])
+
+  function toggleRow(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(leads.map((lead) => lead.id)))
+  }
+
+  function handleBulkFlowComplete(outcome: BulkFlowOutcome) {
+    setBulkFlowMsg(bulkFlowOutcomeMessage(outcome))
+    setSelectedIds(new Set(outcome.skipped.map((item) => item.lead_id)))
+  }
 
   return (
     <div className="space-y-4">
@@ -98,6 +135,33 @@ function AgentLeadsList() {
         </div>
       </div>
 
+      {waBulkEnabled && selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-card border border-finno-500/20 bg-finno-500/5 px-4 py-3">
+          <span className="text-sm font-semibold text-finno-500">
+            {selectedIds.size} selected
+          </span>
+          <BulkFlowAction
+            leadIds={Array.from(selectedIds)}
+            onComplete={handleBulkFlowComplete}
+          />
+          <button
+            type="button"
+            className="text-sm text-text-secondary hover:text-text-primary"
+            onClick={() => {
+              setSelectedIds(new Set())
+              setBulkFlowMsg('')
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+      {bulkFlowMsg && (
+        <p className="rounded-button border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">
+          {bulkFlowMsg}
+        </p>
+      )}
+
       <div className="bg-surface-base rounded-card shadow-[0_1px_3px_rgba(0,0,0,0.07),0_4px_16px_rgba(0,0,0,0.05)] overflow-hidden">
         {loading && leads.length === 0 ? (
           <div className="py-16 text-center text-text-secondary text-sm">Loading…</div>
@@ -107,16 +171,41 @@ function AgentLeadsList() {
           </div>
         ) : (
           <>
-            <div className="hidden sm:grid grid-cols-[2fr_auto] gap-4 px-5 py-2.5 border-b border-border bg-surface-subtle text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            <div className={`hidden sm:grid gap-4 px-5 py-2.5 border-b border-border bg-surface-subtle text-xs font-semibold uppercase tracking-wide text-text-secondary items-center ${
+              waBulkEnabled ? 'grid-cols-[auto_2fr_auto]' : 'grid-cols-[2fr_auto]'
+            }`}>
+              {waBulkEnabled && (
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  aria-label="Select all"
+                  className="accent-finno-500 w-4 h-4 cursor-pointer"
+                />
+              )}
               <span>Name</span>
               <span>Status</span>
             </div>
 
             <ul className="divide-y divide-border">
               {leads.map((lead) => (
-                <li key={lead.id}>
+                <li key={lead.id} className="flex items-stretch">
+                  {waBulkEnabled && (
+                    <div className="flex items-center px-5">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(lead.id)}
+                        onChange={() => toggleRow(lead.id)}
+                        aria-label={`Select ${lead.full_name}`}
+                        className="accent-finno-500 w-4 h-4 cursor-pointer"
+                      />
+                    </div>
+                  )}
                   <button
-                    className="w-full text-left px-5 py-4 hover:bg-surface-subtle transition-colors"
+                    className={`flex-1 min-w-0 text-left py-4 hover:bg-surface-subtle transition-colors ${
+                      waBulkEnabled ? 'px-2' : 'px-5'
+                    }`}
                     onClick={() => { setLeadNav({ ids: leads.map((l) => l.id), returnTo: '/' }); router.push(`/leads/${lead.id}`) }}
                   >
                     <div className="sm:grid sm:grid-cols-[2fr_auto] sm:gap-4 sm:items-center">

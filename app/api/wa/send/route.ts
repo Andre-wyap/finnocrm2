@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/admin-guard'
 import { withUser } from '@/lib/db/rls'
 import intakeSql from '@/lib/db/intake'
 import { isUuid } from '@/lib/validation'
+import { getWhatsAppSafetyConfig, nextAllowedWhatsAppSendAt } from '@/lib/wa/schedule'
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const { profile, error } = await requireAuth(req)
@@ -50,9 +51,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     )
   }
 
+  const safety = getWhatsAppSafetyConfig()
+  const runAt = nextAllowedWhatsAppSendAt(new Date(), safety.quietHours)
   const [job] = await intakeSql<{ id: string; run_at: string }[]>`
-    INSERT INTO wa_jobs (lead_id, template_id, sender_profile_id)
-    VALUES (${leadId}::uuid, ${templateId}::uuid, ${profile.id}::uuid)
+    INSERT INTO wa_jobs (lead_id, template_id, sender_profile_id, run_at)
+    VALUES (${leadId}::uuid, ${templateId}::uuid, ${profile.id}::uuid, ${runAt})
     RETURNING id, run_at
   `
   return NextResponse.json({ job_id: job.id, status: 'pending', run_at: job.run_at }, { status: 202 })

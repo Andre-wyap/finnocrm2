@@ -128,6 +128,7 @@ export interface WaJob {
   status: WaJobStatus
   attempts: number
   last_error: string | null
+  processing_started_at: string | null
   sent_at: string | null
   created_at: string
 }

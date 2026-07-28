@@ -7,6 +7,11 @@ import { apiFetch } from '@/lib/api/client'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
+import {
+  BulkFlowAction,
+  bulkFlowOutcomeMessage,
+  type BulkFlowOutcome,
+} from '@/components/wa/BulkFlowAction'
 import { AlertTriangle, ClipboardList, Star } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { setLeadNav } from '@/lib/lead-nav'
@@ -99,6 +104,7 @@ export default function LeadsPage() {
   const [bulkAgent,     setBulkAgent]     = useState('')
   const [bulkAssigning, setBulkAssigning] = useState(false)
   const [bulkMsg,       setBulkMsg]       = useState('')
+  const [bulkFlowMsg,   setBulkFlowMsg]   = useState('')
   const selectAllRef = useRef<HTMLInputElement>(null)
 
   const allSelected  = leads.length > 0 && selectedIds.size === leads.length
@@ -190,6 +196,11 @@ export default function LeadsPage() {
     } finally {
       setBulkAssigning(false)
     }
+  }
+
+  function handleBulkFlowComplete(outcome: BulkFlowOutcome) {
+    setBulkFlowMsg(bulkFlowOutcomeMessage(outcome))
+    setSelectedIds(new Set(outcome.skipped.map((item) => item.lead_id)))
   }
 
   if (!canAccessPage) return null
@@ -309,15 +320,28 @@ export default function LeadsPage() {
           >
             Reassign Selected
           </Button>
+          <BulkFlowAction
+            leadIds={Array.from(selectedIds)}
+            onComplete={handleBulkFlowComplete}
+          />
           <button
             type="button"
             className="text-sm text-text-secondary hover:text-text-primary shrink-0"
-            onClick={() => { setSelectedIds(new Set()); setBulkMsg('') }}
+            onClick={() => {
+              setSelectedIds(new Set())
+              setBulkMsg('')
+              setBulkFlowMsg('')
+            }}
           >
             Clear
           </button>
           {bulkMsg && <p className="text-xs text-text-secondary">{bulkMsg}</p>}
         </div>
+      )}
+      {bulkFlowMsg && (
+        <p className="rounded-button border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-800">
+          {bulkFlowMsg}
+        </p>
       )}
 
       {/* Leads list */}
