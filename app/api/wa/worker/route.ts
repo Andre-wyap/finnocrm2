@@ -65,6 +65,13 @@ async function failJob(id: string, message: string): Promise<void> {
   })
 }
 
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (!validWorkerSecret(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  return NextResponse.json({ ok: true })
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!validWorkerSecret(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
