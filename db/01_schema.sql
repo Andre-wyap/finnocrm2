@@ -12,8 +12,9 @@ CREATE TYPE lead_status AS ENUM ('unassigned', 'lead', 'approach', 'follow_up', 
 CREATE TYPE gender AS ENUM ('male', 'female');
 CREATE TYPE smoking_status AS ENUM ('smoker', 'non_smoker');
 CREATE TYPE product AS ENUM ('medical', 'critical_illness', 'life', 'personal_accident');
-CREATE TYPE activity_type AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore');
+CREATE TYPE activity_type AS ENUM ('remark', 'call', 'status_change', 'field_change', 'assignment', 'archive', 'restore', 'wa_message');
 CREATE TYPE wa_instance_status AS ENUM ('disconnected', 'connecting', 'connected');
+CREATE TYPE wa_job_status AS ENUM ('pending', 'processing', 'sent', 'failed', 'cancelled');
 
 -- ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,40 @@ CREATE TABLE wa_instances (
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE wa_media (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_name   text NOT NULL,
+  mime_type   text NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+  size_bytes  integer NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 10485760),
+  data        bytea NOT NULL CHECK (octet_length(data) = size_bytes),
+  uploaded_by uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE wa_templates (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+  body       text NOT NULL CHECK (length(trim(body)) > 0),
+  media_id   uuid REFERENCES wa_media(id) ON DELETE SET NULL,
+  is_active  boolean NOT NULL DEFAULT true,
+  created_by uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE wa_jobs (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id           uuid NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  template_id       uuid NOT NULL REFERENCES wa_templates(id) ON DELETE RESTRICT,
+  sender_profile_id uuid NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  run_at             timestamptz NOT NULL DEFAULT now(),
+  status             wa_job_status NOT NULL DEFAULT 'pending',
+  attempts           integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  last_error         text,
+  sent_at            timestamptz,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+
 -- ─── Indexes ──────────────────────────────────────────────────────────────────
 
 CREATE INDEX idx_leads_assigned_agent   ON leads(assigned_agent_id);
@@ -117,6 +152,7 @@ CREATE INDEX idx_activities_lead_id     ON activities(lead_id);
 CREATE INDEX idx_profiles_firebase_uid  ON profiles(firebase_uid);
 CREATE INDEX idx_profiles_team_id       ON profiles(team_id);
 CREATE INDEX idx_team_sources_team_id   ON team_sources(team_id);
+CREATE INDEX idx_wa_jobs_due            ON wa_jobs(status, run_at) WHERE status = 'pending';
 
 -- ─── Table grants ─────────────────────────────────────────────────────────────
 
@@ -127,7 +163,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON leads        TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON activities   TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON team_sources TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON wa_instances TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON wa_media, wa_templates TO app_user;
 
 -- intake_role: only needs to INSERT leads (and read for duplicate check + source→team lookup)
 GRANT SELECT, INSERT ON leads TO intake_role;
 GRANT SELECT ON team_sources TO intake_role;
+GRANT SELECT ON profiles, wa_instances, wa_templates, wa_media TO intake_role;
+GRANT SELECT, INSERT, UPDATE ON wa_jobs TO intake_role;
+GRANT INSERT ON activities TO intake_role;

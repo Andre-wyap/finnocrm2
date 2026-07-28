@@ -13,7 +13,9 @@ export type ActivityType =
   | 'assignment'
   | 'archive'
   | 'restore'
+  | 'wa_message'
 export type WaInstanceStatus = 'disconnected' | 'connecting' | 'connected'
+export type WaJobStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'cancelled'
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -53,6 +55,42 @@ export interface WaInstance {
   connected_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface WaMedia {
+  id: string
+  file_name: string
+  mime_type: string
+  size_bytes: number
+  uploaded_by: string
+  created_at: string
+}
+
+export interface WaTemplate {
+  id: string
+  name: string
+  body: string
+  media_id: string | null
+  media_file_name: string | null
+  media_mime_type: string | null
+  media_size_bytes: number | null
+  is_active: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WaJob {
+  id: string
+  lead_id: string
+  template_id: string
+  sender_profile_id: string
+  run_at: string
+  status: WaJobStatus
+  attempts: number
+  last_error: string | null
+  sent_at: string | null
+  created_at: string
 }
 
 export interface Lead {

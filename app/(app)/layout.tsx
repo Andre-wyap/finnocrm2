@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/client'
 import { useAuth } from '@/lib/auth/context'
-import { LogOut, Users, LayoutDashboard, UserCircle, ClipboardList, BarChart2, ShieldAlert, Menu, X } from 'lucide-react'
+import { LogOut, Users, LayoutDashboard, UserCircle, ClipboardList, BarChart2, ShieldAlert, Menu, X, MessageCircle } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
@@ -62,6 +62,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       ? [
           { href: '/admin/users', label: 'Users',        icon: UserCircle },
           { href: '/admin/leads', label: 'Manage Leads', icon: ShieldAlert },
+          { href: '/admin/whatsapp', label: 'WhatsApp',  icon: MessageCircle },
         ]
       : []),
     { href: '/profile', label: 'Profile', icon: UserCircle },

@@ -48,6 +48,10 @@ CREATE TRIGGER wa_instances_updated_at
   BEFORE UPDATE ON wa_instances
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER wa_templates_updated_at
+  BEFORE UPDATE ON wa_templates
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- ─── Trigger: audit log for lead field / status changes ───────────────────────
 -- Writes field_change or status_change to activities on every UPDATE.
 -- Excludes assignment fields (assigned_agent_id, assigned_by, assigned_at)

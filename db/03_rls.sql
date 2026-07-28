@@ -9,6 +9,9 @@ ALTER TABLE activities   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teams        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wa_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_media     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wa_jobs      ENABLE ROW LEVEL SECURITY;
 
 -- Force RLS even for the table owner (keeps testing honest)
 ALTER TABLE leads        FORCE ROW LEVEL SECURITY;
@@ -17,6 +20,9 @@ ALTER TABLE activities   FORCE ROW LEVEL SECURITY;
 ALTER TABLE teams        FORCE ROW LEVEL SECURITY;
 ALTER TABLE team_sources FORCE ROW LEVEL SECURITY;
 ALTER TABLE wa_instances FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_media     FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_templates FORCE ROW LEVEL SECURITY;
+ALTER TABLE wa_jobs      FORCE ROW LEVEL SECURITY;
 
 -- ─── leads ────────────────────────────────────────────────────────────────────
 
@@ -228,3 +234,36 @@ CREATE POLICY wa_instances_update ON wa_instances FOR UPDATE
 CREATE POLICY wa_instances_delete ON wa_instances FOR DELETE USING (
   profile_id = current_user_id() OR current_user_role() = 'admin'
 );
+
+-- ─── WhatsApp templates and media ────────────────────────────────────────────
+
+CREATE POLICY wa_media_select ON wa_media FOR SELECT USING (
+  current_user_role() = 'admin'
+  OR (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+);
+CREATE POLICY wa_media_insert ON wa_media FOR INSERT WITH CHECK (
+  current_user_role() = 'admin'
+);
+CREATE POLICY wa_media_update ON wa_media FOR UPDATE
+  USING (current_user_role() = 'admin')
+  WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_media_delete ON wa_media FOR DELETE USING (
+  current_user_role() = 'admin'
+);
+
+CREATE POLICY wa_templates_select ON wa_templates FOR SELECT USING (
+  current_user_role() = 'admin'
+  OR (SELECT wa_enabled FROM profiles WHERE id = current_user_id())
+);
+CREATE POLICY wa_templates_insert ON wa_templates FOR INSERT WITH CHECK (
+  current_user_role() = 'admin'
+);
+CREATE POLICY wa_templates_update ON wa_templates FOR UPDATE
+  USING (current_user_role() = 'admin')
+  WITH CHECK (current_user_role() = 'admin');
+CREATE POLICY wa_templates_delete ON wa_templates FOR DELETE USING (
+  current_user_role() = 'admin'
+);
+
+-- wa_jobs intentionally has no app_user policies. The privileged worker owns
+-- all queue reads and transitions.

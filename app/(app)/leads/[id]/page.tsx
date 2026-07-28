@@ -6,6 +6,8 @@ import { useAuth } from '@/lib/auth/context'
 import { apiFetch } from '@/lib/api/client'
 import { getLeadNav } from '@/lib/lead-nav'
 import { insuranceAge } from '@/lib/age'
+import { whatsappChatUrl } from '@/lib/wa/phone'
+import { renderWhatsAppTemplate } from '@/lib/wa/render'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -15,7 +17,7 @@ import {
   ArrowRight, Edit2, UserCheck, Send, Archive, ArchiveRestore,
   ChevronLeft, ChevronRight, Star,
 } from 'lucide-react'
-import type { LeadStatus, ActivityType } from '@/types'
+import type { LeadStatus, ActivityType, WaTemplate } from '@/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -147,17 +149,6 @@ function leadToDraft(lead: LeadDetail): FormDraft {
   }
 }
 
-function whatsappUrl(mobile: string): string | null {
-  const trimmed = mobile.trim()
-  if (!trimmed) return null
-
-  const digits = trimmed.replace(/\D/g, '')
-  if (!digits) return null
-
-  const normalized = digits.startsWith('0') ? `60${digits.slice(1)}` : digits
-  return `https://wa.me/${normalized}`
-}
-
 // ── Activity icon ─────────────────────────────────────────────────────────────
 
 function ActivityIcon({ type }: { type: ActivityType }) {
@@ -169,6 +160,7 @@ function ActivityIcon({ type }: { type: ActivityType }) {
     assignment:    <UserCheck size={14} />,
     archive:       <Archive size={14} />,
     restore:       <ArchiveRestore size={14} />,
+    wa_message:    <MessageCircle size={14} />,
   }
   const bg: Record<ActivityType, string> = {
     remark:        'bg-blue-100 text-blue-600',
@@ -178,6 +170,7 @@ function ActivityIcon({ type }: { type: ActivityType }) {
     assignment:    'bg-finno-500/10 text-finno-500',
     archive:       'bg-amber-100 text-amber-600',
     restore:       'bg-green-100 text-green-600',
+    wa_message:    'bg-teal-100 text-teal-600',
   }
   return (
     <span className={`flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${bg[type]}`}>
@@ -243,6 +236,12 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [dismissingDuplicate, setDismissingDuplicate] = useState(false)
   const [navigating, setNavigating] = useState(false)
   const [highlighting, setHighlighting] = useState(false)
+  const [waTemplates, setWaTemplates] = useState<WaTemplate[]>([])
+  const [selectedWaTemplateId, setSelectedWaTemplateId] = useState('')
+  const [waTemplatesLoading, setWaTemplatesLoading] = useState(false)
+  const [waSending, setWaSending] = useState(false)
+  const [waMessage, setWaMessage] = useState('')
+  const [waError, setWaError] = useState('')
   const remarkRef = useRef<HTMLTextAreaElement>(null)
 
   const isAdminOrSubadmin = profile?.role === 'admin' || profile?.role === 'subadmin'
@@ -286,6 +285,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     setRemarkText('')
     setSelectedAgentId('')
     setLostConfirm(false)
+    setSelectedWaTemplateId('')
+    setWaMessage('')
+    setWaError('')
   }, [id])
 
   useEffect(() => {
@@ -295,6 +297,16 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
       .then(setAgents)
       .catch(() => {})
   }, [isAdminOrSubadmin])
+
+  useEffect(() => {
+    if (!profile?.wa_enabled) return
+    setWaTemplatesLoading(true)
+    apiFetch('/api/wa/templates')
+      .then(async (res) => {
+        if (res.ok) setWaTemplates(await res.json())
+      })
+      .finally(() => setWaTemplatesLoading(false))
+  }, [profile?.wa_enabled])
 
   function setField<K extends keyof FormDraft>(key: K, value: FormDraft[K]) {
     setDraft((d) => d ? { ...d, [key]: value } : d)
@@ -495,6 +507,27 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     }
   }
 
+  async function handleSendWhatsAppTemplate() {
+    if (!selectedWaTemplateId) return
+    setWaSending(true)
+    setWaMessage('')
+    setWaError('')
+    try {
+      const res = await apiFetch('/api/wa/send', {
+        method: 'POST',
+        body: JSON.stringify({ lead_id: id, template_id: selectedWaTemplateId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setWaError(data.error ?? 'Could not queue WhatsApp message')
+        return
+      }
+      setWaMessage('Message queued. It will send within about one minute.')
+    } finally {
+      setWaSending(false)
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -513,8 +546,18 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     )
   }
 
-  const leadWhatsappUrl = whatsappUrl(lead.mobile)
+  const leadWhatsappUrl = whatsappChatUrl(lead.mobile)
   const dobAge = insuranceAge(draft.date_of_birth)
+  const selectedWaTemplate = waTemplates.find((template) => template.id === selectedWaTemplateId)
+  const waPreview = selectedWaTemplate
+    ? renderWhatsAppTemplate(selectedWaTemplate.body, {
+        full_name: lead.full_name,
+        agent_name: profile?.full_name,
+        state: lead.state,
+        product_interest: lead.product_interest,
+      }).text
+    : ''
+  const canSendWhatsApp = profile?.wa_enabled && lead.assigned_agent_id === profile.id
 
   return (
     <div>
@@ -878,6 +921,69 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
               </p>
             )}
           </div>
+
+          {profile?.wa_enabled && (
+            <div className="rounded-card border border-teal-500/25 bg-teal-50/60 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <MessageCircle size={16} className="text-teal-600" />
+                <h3 className="text-sm font-semibold text-text-primary">Send WhatsApp Template</h3>
+              </div>
+
+              {!canSendWhatsApp ? (
+                <p className="text-sm text-text-secondary">
+                  Only the lead&apos;s assigned WhatsApp-enabled agent can send a template.
+                </p>
+              ) : (
+                <>
+                  <Select
+                    label="Template"
+                    value={selectedWaTemplateId}
+                    onChange={(event) => {
+                      setSelectedWaTemplateId(event.target.value)
+                      setWaMessage('')
+                      setWaError('')
+                    }}
+                    disabled={waTemplatesLoading}
+                  >
+                    <option value="">
+                      {waTemplatesLoading ? 'Loading templates…' : 'Select template…'}
+                    </option>
+                    {waTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>{template.name}</option>
+                    ))}
+                  </Select>
+
+                  {selectedWaTemplate && (
+                    <div className="rounded-button border border-border bg-white p-3 space-y-2">
+                      <p className="text-sm text-text-secondary whitespace-pre-wrap">{waPreview}</p>
+                      {selectedWaTemplate.media_file_name && (
+                        <p className="text-xs font-medium text-teal-700">
+                          Attachment: {selectedWaTemplate.media_file_name}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {waTemplates.length === 0 && !waTemplatesLoading && (
+                    <p className="text-xs text-text-secondary">
+                      No active templates are available. Ask an admin to create one.
+                    </p>
+                  )}
+                  {waError && <p className="text-sm text-red-500">{waError}</p>}
+                  {waMessage && <p className="text-sm text-teal-700">{waMessage}</p>}
+                  <Button
+                    size="sm"
+                    variant="accent"
+                    onClick={handleSendWhatsAppTemplate}
+                    disabled={!selectedWaTemplateId}
+                    loading={waSending}
+                  >
+                    <Send size={14} /> Send Template
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Feed */}
           {activities.length === 0 ? (

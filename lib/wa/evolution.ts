@@ -133,3 +133,38 @@ export async function logoutInstance(instanceName: string): Promise<void> {
 export async function deleteInstance(instanceName: string): Promise<void> {
   await evo(`/instance/delete/${encodeURIComponent(instanceName)}`, { method: 'DELETE' })
 }
+
+export async function sendText(
+  instanceName: string,
+  number: string,
+  text: string
+): Promise<unknown> {
+  return evo(`/message/sendText/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    body: { number, text },
+  })
+}
+
+export async function sendMedia(
+  instanceName: string,
+  input: {
+    number: string
+    mimeType: string
+    fileName: string
+    base64: string
+    caption?: string
+  }
+): Promise<unknown> {
+  const mediaType = input.mimeType === 'application/pdf' ? 'document' : 'image'
+  return evo(`/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+    method: 'POST',
+    body: {
+      number: input.number,
+      mediatype: mediaType,
+      mimetype: input.mimeType,
+      caption: input.caption ?? '',
+      media: input.base64,
+      fileName: input.fileName,
+    },
+  })
+}
