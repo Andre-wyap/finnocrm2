@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import type { LeadStatus, Role } from '@/types'
 
-const STATUS_STYLES: Record<LeadStatus, string> = {
+export const STATUS_STYLES: Record<LeadStatus, string> = {
   unassigned: 'bg-amber-100 text-amber-700',
   lead:        'bg-blue-100 text-blue-700',
   approach:    'bg-sky-100 text-sky-700',
@@ -12,7 +12,7 @@ const STATUS_STYLES: Record<LeadStatus, string> = {
   lost:        'bg-gray-100 text-gray-500',
 }
 
-const STATUS_LABELS: Record<LeadStatus, string> = {
+export const STATUS_LABELS: Record<LeadStatus, string> = {
   unassigned: 'Unassigned',
   lead:        'Lead',
   approach:    'Approach',
