@@ -17,6 +17,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const team = p.get('team') ?? null
   // archived: default 'false' → active only; 'true' → archived only; 'all' → both.
   const archived = p.get('archived') ?? 'false'
+  // Free-text search over name / mobile / email. LIKE wildcards in the raw
+  // input are escaped so a user typing "%" searches for a literal percent.
+  const search = (p.get('q') ?? '').trim().slice(0, 100)
+  const searchLike = search ? `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null
+  // Mobiles are stored with whatever punctuation the landing page sent, so
+  // match digits against digits ("012-345" finds "0123456789").
+  const searchDigits = search.replace(/\D/g, '')
   const parsedLimit = Number.parseInt(p.get('limit') ?? '50', 10)
   const parsedOffset = Number.parseInt(p.get('offset') ?? '0', 10)
   const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 50
@@ -38,6 +45,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       archived === 'true' ? tx`AND l.archived_at IS NOT NULL`
       : archived === 'all' ? tx``
       : tx`AND l.archived_at IS NULL`
+    const searchCond =
+      !searchLike ? tx``
+      : searchDigits ? tx`AND (l.full_name ILIKE ${searchLike} OR l.email ILIKE ${searchLike} OR regexp_replace(l.mobile, '[^0-9]', '', 'g') LIKE ${`%${searchDigits}%`})`
+      : tx`AND (l.full_name ILIKE ${searchLike} OR l.email ILIKE ${searchLike})`
 
     return tx<{
       id: string
@@ -63,7 +74,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       FROM leads l
       LEFT JOIN profiles p ON p.id = l.assigned_agent_id
       LEFT JOIN activities ha ON ha.id = l.highlighted_activity_id
-      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond}
+      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond} ${searchCond}
       ORDER BY l.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `
@@ -78,9 +89,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       archived === 'true' ? tx`AND l.archived_at IS NOT NULL`
       : archived === 'all' ? tx``
       : tx`AND l.archived_at IS NULL`
+    const searchCond =
+      !searchLike ? tx``
+      : searchDigits ? tx`AND (l.full_name ILIKE ${searchLike} OR l.email ILIKE ${searchLike} OR regexp_replace(l.mobile, '[^0-9]', '', 'g') LIKE ${`%${searchDigits}%`})`
+      : tx`AND (l.full_name ILIKE ${searchLike} OR l.email ILIKE ${searchLike})`
     return tx<{ total: number }[]>`
       SELECT COUNT(*)::int AS total FROM leads l
-      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond}
+      WHERE 1=1 ${statusCond} ${productCond} ${agentCond} ${teamCond} ${archivedCond} ${searchCond}
     `
   })
 

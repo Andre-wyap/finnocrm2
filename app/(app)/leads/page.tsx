@@ -7,12 +7,13 @@ import { apiFetch } from '@/lib/api/client'
 import { StatusBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import {
   BulkFlowAction,
   bulkFlowOutcomeMessage,
   type BulkFlowOutcome,
 } from '@/components/wa/BulkFlowAction'
-import { AlertTriangle, ClipboardList, Star } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Search, Star, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { setLeadNav } from '@/lib/lead-nav'
 import { insuranceAge } from '@/lib/age'
@@ -91,6 +92,9 @@ export default function LeadsPage() {
   // assigned to the current user (a cleaner, focused view).
   // Persisted so returning from a lead card (Back) lands on the same tab.
   const [view,          setView]          = useState<'all' | 'mine'>('all')
+  // Free-text search over name / mobile / email, debounced before it hits the API.
+  const [search,        setSearch]        = useState('')
+  const [searchQuery,   setSearchQuery]   = useState('')
   const [statusFilter,  setStatusFilter]  = useState('')
   const [productFilter, setProductFilter] = useState('')
   const [agentFilter,   setAgentFilter]   = useState('')
@@ -120,6 +124,11 @@ export default function LeadsPage() {
     if (saved === 'mine' || saved === 'all') setView(saved)
   }, [])
 
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
   function selectView(next: 'all' | 'mine') {
     setView(next)
     setSelectedIds(new Set())
@@ -146,6 +155,7 @@ export default function LeadsPage() {
     const effectiveAgent = view === 'mine' ? (profile?.id ?? '') : agentFilter
     const effectiveTeam  = view === 'mine' ? '' : teamFilter
     const params = new URLSearchParams({ limit: String(LIMIT), offset: String(off) })
+    if (searchQuery)    params.set('q',       searchQuery)
     if (statusFilter)   params.set('status',  statusFilter)
     if (productFilter)  params.set('product', productFilter)
     if (effectiveAgent) params.set('agent',   effectiveAgent)
@@ -158,7 +168,7 @@ export default function LeadsPage() {
       setOffset(off)
     }
     setLoading(false)
-  }, [view, profile?.id, statusFilter, productFilter, agentFilter, teamFilter])
+  }, [view, profile?.id, searchQuery, statusFilter, productFilter, agentFilter, teamFilter])
 
   useEffect(() => {
     if (profile && !canAccessPage) { router.replace('/'); return }
@@ -206,7 +216,7 @@ export default function LeadsPage() {
   if (!canAccessPage) return null
 
   const hasFilters =
-    statusFilter || productFilter || (view === 'all' && (agentFilter || teamFilter))
+    search || statusFilter || productFilter || (view === 'all' && (agentFilter || teamFilter))
 
   return (
     <div className="space-y-5">
@@ -222,6 +232,27 @@ export default function LeadsPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2 items-center">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none" />
+            <Input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, mobile, email"
+              aria-label="Search leads"
+              className="h-9 text-xs w-56 pl-8 pr-8"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
           <Select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -264,7 +295,7 @@ export default function LeadsPage() {
           )}
           {hasFilters && (
             <button
-              onClick={() => { setStatusFilter(''); setProductFilter(''); setAgentFilter(''); setTeamFilter('') }}
+              onClick={() => { setSearch(''); setStatusFilter(''); setProductFilter(''); setAgentFilter(''); setTeamFilter('') }}
               className="text-xs text-finno-500 hover:underline shrink-0"
             >
               Clear
@@ -350,7 +381,7 @@ export default function LeadsPage() {
           <div className="py-16 text-center text-text-secondary text-sm">Loading…</div>
         ) : leads.length === 0 ? (
           <div className="py-16 text-center text-text-secondary text-sm">
-            No leads found.{hasFilters ? ' Try clearing the filters.' : ''}
+            No leads found.{hasFilters ? ' Try clearing the search or filters.' : ''}
           </div>
         ) : (
           <>
